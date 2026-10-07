@@ -1,0 +1,5 @@
+# Original game data (copyrighted) and local work files are never committed.
+web/data/
+work/
+tools/harness/harness
+__pycache__/
