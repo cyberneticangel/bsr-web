@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Big Scale Racing</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="canvas" tabindex="-1"></canvas>
+
+<div id="hud" class="hidden">
+  <div class="hud-tl">
+    <div class="pos"><span id="h-place">1</span><small>/<span id="h-racers">1</span></small></div>
+    <div class="lap">LAP <span id="h-lap">1</span>/<span id="h-laps">3</span></div>
+  </div>
+  <div class="hud-tr">
+    <div>TIME <span id="h-time">0:00.00</span></div>
+    <div>LAP <span id="h-laptime">0:00.00</span></div>
+    <div>BEST <span id="h-best">-:--.--</span></div>
+  </div>
+  <div class="hud-br"><span id="h-speed">0</span><small>km/h</small></div>
+  <div id="h-countdown" class="countdown"></div>
+  <div id="h-msg" class="msg"></div>
+  <div class="hud-keys">↑↓←→ drive · Space handbrake · C camera · R reset · P pause</div>
+</div>
+
+<div id="touch" class="hidden">
+  <div id="t-steer" class="t-pad"><div id="t-knob"></div></div>
+  <div class="t-btns">
+    <button id="t-brake">BRAKE</button>
+    <button id="t-gas">GAS</button>
+  </div>
+</div>
+
+<div id="menu" class="panel">
+  <h1>BIG SCALE RACING</h1>
+  <p class="sub">WebAssembly port · original BumbleBeast data</p>
+  <div class="row"><label>Track</label><div id="tracks" class="choices"></div></div>
+  <div class="row"><label>Class</label><select id="cls"></select></div>
+  <div class="row"><label>Weather</label><select id="weather"></select></div>
+  <div class="row"><label>Skin</label><div id="skins" class="choices skins"></div></div>
+  <div class="row"><label>Opponents</label><input id="opp" type="range" min="0" max="7" value="5"><span id="opp-v">5</span></div>
+  <div class="row"><label>Laps</label><input id="laps" type="range" min="1" max="10" value="3"><span id="laps-v">3</span></div>
+  <div class="row"><label>Music</label><input id="music" type="checkbox" checked></div>
+  <button id="go" class="big">RACE</button>
+  <div id="status"></div>
+</div>
+
+<div id="pause" class="panel hidden">
+  <h2>PAUSED</h2>
+  <button id="resume" class="big">RESUME</button>
+  <button id="restart">RESTART</button>
+  <button id="quit">QUIT TO MENU</button>
+</div>
+
+<div id="results" class="panel hidden">
+  <h2>RESULTS</h2>
+  <table id="res-table"></table>
+  <button id="again" class="big">RACE AGAIN</button>
+  <button id="tomenu">MENU</button>
+</div>
+
+<script src="game.js"></script>
+<script src="bsr.js"></script>
+</body>
+</html>
