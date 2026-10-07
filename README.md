@@ -2,7 +2,8 @@
 
 A browser reimplementation of *Big Scale Racing* (BumbleBeast, 2002) that runs on the **original game data**.
 The engine is new C++ compiled to WebAssembly (WebGL 2). It decodes the game's own encrypted/packed formats
-at runtime, so the data files are served unmodified. See [FORMATS.md](FORMATS.md) for the reverse-engineered formats.
+at runtime, so the data files are served unmodified. See [FORMATS.md](FORMATS.md) for the reverse-engineered formats and
+[docs/TECHNICAL.md](docs/TECHNICAL.md) for the full technical documentation.
 
 What works: all 6 tracks, all 11 car classes with their 12 skins each, AI opponents on the original racing lines,
 checkpoints/laps/positions, the original sky/fog weather presets, engine/skid/impact sounds, music, keyboard,
