@@ -30,7 +30,7 @@ void Game::buildCarModel(CarModel& cm, const FSO& fso, const std::map<std::strin
 }
 
 bool Game::start(const std::string& track, const std::string& carClass, const std::vector<std::string>& skinsIn,
-                 int opponents, int laps, float topSpeedKmh, const std::string& weather) {
+                 int opponents, int laps, float topSpeedKmh, const std::string& weather, const std::string& rolesIn) {
     stop();
     std::string t = lower(track);
     if (t != trackName_ || lower(weather) != weatherName_) {
@@ -39,7 +39,7 @@ bool Game::start(const std::string& track, const std::string& carClass, const st
         if (!loadWeather(weather, wx)) loadWeather("sunny_bluesky_summer", wx);
         for (auto& [from, to] : wx.replace) swaps[from] = to;
         weatherName_ = lower(weather);
-        track_ = Model();
+        gfx_.release(track_);
         trackFso_ = FSO();
         meta_ = TrackMeta();
         trackName_.clear();
@@ -79,8 +79,9 @@ bool Game::start(const std::string& track, const std::string& carClass, const st
     if (cls == "monster") { spec.grip = 1.1f; spec.mass = 12; }
     spec.steerMax = 0.5f;
 
+    std::string roles = rolesIn.empty() ? "0" + std::string(std::max(0, opponents), 'a') : rolesIn;
     laps_ = std::max(1, laps);
-    int n = std::min(1 + std::max(0, opponents), (int)meta_.grid.size());
+    int n = std::min((int)roles.size(), (int)meta_.grid.size());
     for (int i = 0; i < n; i++) {
         auto cm = std::make_unique<CarModel>();
         std::map<std::string, std::string> ov;
@@ -97,9 +98,12 @@ bool Game::start(const std::string& track, const std::string& carClass, const st
         for (auto& p : cm->model.parts)
             if (lower(p.name).find("coll_sphere") != std::string::npos)
                 sph.push_back({(p.bmin + p.bmax) * 0.5f, (p.bmax.x - p.bmin.x) * 0.5f});
-        r.ai = i != 0;
+        char role = roles[i];
+        r.player = role >= '0' && role < '0' + kMaxLocal ? role - '0' : -1;
+        r.remote = role == 'r';
+        r.ai = r.player < 0 && !r.remote;
         r.aiLine = i % std::min<size_t>(5, meta_.aiLines.size());  // aii06 is an alternate (pit) line
-        r.aiSkill = i == 0 ? 1.0f : 0.86f + 0.1f * (float)((i * 7) % 5) / 4.0f;
+        r.aiSkill = !r.ai ? 1.0f : 0.86f + 0.1f * (float)((i * 7) % 5) / 4.0f;
         r.car.setup(wc, wr, sph, spec);
         const GridSlot& gs = meta_.grid[slot];
         r.car.place(gs.pos, gs.heading, world_);
@@ -109,20 +113,49 @@ bool Game::start(const std::string& track, const std::string& carClass, const st
         racers_.push_back(r);
         carModels_.push_back(std::move(cm));
     }
+    snaps_.assign(racers_.size(), SnapshotBuffer());
+    for (int p = 0; p < kMaxLocal; p++)
+        for (int i = 0; i < n; i++)
+            if (racers_[i].player == p) {
+                View v;
+                v.racer = i;
+                v.camMode = defaultCam_;
+                players_.push_back(v);
+            }
+    if (players_.empty() && n > 0) {  // nobody local on the grid: spectate the first car
+        View v;
+        v.camMode = defaultCam_;
+        players_.push_back(v);
+    }
     state_ = Countdown;
     countdown_ = 3.999f;
     lastCountdownSec_ = -1;
     raceTime_ = 0;
     paused = false;
-    camInit_ = false;
+    waiting = false;
     accum_ = 0;
     return true;
 }
 
 void Game::stop() {
     racers_.clear();
+    for (auto& cm : carModels_) gfx_.release(cm->model);
     carModels_.clear();
+    snaps_.clear();
+    players_.clear();
+    waiting = false;
     state_ = Idle;
+}
+
+void Game::cycleCamera(int p) {
+    if (p < 0 || p >= (int)players_.size()) return;
+    players_[p].camMode = (players_[p].camMode + 1) % 3;
+    players_[p].camInit = false;
+}
+
+void Game::setCamera(int m) {
+    defaultCam_ = m % 3;
+    for (auto& v : players_) { v.camMode = defaultCam_; v.camInit = false; }
 }
 
 void Game::placeOnLine(Racer& r) {
@@ -134,26 +167,35 @@ void Game::placeOnLine(Racer& r) {
     r.pathIdx = i;
 }
 
-void Game::resetPlayer() {
-    if (!racers_.empty() && state_ != Countdown) placeOnLine(racers_[0]);
+void Game::resetPlayer(int p) {
+    if (p < 0 || p >= (int)players_.size() || state_ == Countdown) return;
+    Racer& r = racers_[players_[p].racer];
+    if (r.player == p) placeOnLine(r);
 }
 
 void Game::stepPhysics(float dt) {
     bool frozen = state_ == Countdown;
     for (size_t i = 0; i < racers_.size(); i++) {
         Racer& r = racers_[i];
+        if (r.remote || r.gone) continue;  // remote cars are placed from snapshots
         r.car.hold = frozen;
         r.car.step(dt, world_);
     }
+    // Each machine only pushes the cars it simulates; the owner of the other car resolves its half.
     for (size_t i = 0; i < racers_.size(); i++)
-        for (size_t j = i + 1; j < racers_.size(); j++) collideCars(racers_[i].car, racers_[j].car);
+        for (size_t j = i + 1; j < racers_.size(); j++) {
+            Racer& a = racers_[i];
+            Racer& b = racers_[j];
+            if (a.gone || b.gone || (a.remote && b.remote)) continue;
+            collideCars(a.car, b.car, !a.remote, !b.remote);
+        }
 }
 
 void Game::updateRace(float) {
     const int ncp = (int)meta_.checkpoints.size();
     for (size_t i = 0; i < racers_.size(); i++) {
         Racer& r = racers_[i];
-        if (crossed(r.prevPos, r.car.pos, meta_.checkpoints[r.nextCp])) {
+        if (!r.remote && crossed(r.prevPos, r.car.pos, meta_.checkpoints[r.nextCp])) {
             if (r.nextCp == 0) {
                 if (r.lap > 0) {
                     r.lastLap = raceTime_ - r.lapStart;
@@ -161,12 +203,15 @@ void Game::updateRace(float) {
                 }
                 r.lapStart = raceTime_;
                 r.lap++;
+                char ev[32];
                 if (r.lap > laps_ && !r.finished) {
                     r.finished = true;
                     r.finishTime = raceTime_;
-                    if (i == 0) emit("finish");
-                } else if (i == 0 && r.lap > 1 && !r.finished) {
-                    emit(r.lap == laps_ ? "lastlap" : "lap");
+                    snprintf(ev, sizeof ev, "finish:%d", r.player);
+                    if (r.player >= 0) emit(ev);
+                } else if (r.player >= 0 && r.lap > 1 && !r.finished) {
+                    snprintf(ev, sizeof ev, "%s:%d", r.lap == laps_ ? "lastlap" : "lap", r.player);
+                    emit(ev);
                 }
             }
             r.nextCp = (r.nextCp + 1) % ncp;
@@ -187,18 +232,20 @@ void Game::updateRace(float) {
         const Racer& B = racers_[b];
         if (A.finished != B.finished) return A.finished;
         if (A.finished) return A.finishTime < B.finishTime;
+        if (A.gone != B.gone) return B.gone;  // left without finishing: last
         return score(A) > score(B);
     });
     for (size_t i = 0; i < order.size(); i++) racers_[order[i]].place = (int)i + 1;
 }
 
-void Game::update(float dt, const Input& in) {
+void Game::update(float dt, const Input* in, int numInputs) {
     camDt_ += dt;
     if (racers_.empty() || paused) {
-        if (cb.audio) cb.audio(0, 0, 0, 0, 0);
+        if (cb.audio)
+            for (int p = 0; p < (int)players_.size(); p++) cb.audio(p, 0, 0, 0, 0, 0);
         return;
     }
-    if (state_ == Countdown) {
+    if (state_ == Countdown && !waiting) {
         countdown_ -= dt;
         int sec = (int)std::ceil(countdown_);
         if (sec != lastCountdownSec_ && sec >= 0) {
@@ -206,71 +253,99 @@ void Game::update(float dt, const Input& in) {
             emit(sec == 0 ? "go" : "beep");
         }
         if (countdown_ <= 0) state_ = Racing;
-    } else {
+    } else if (state_ != Countdown) {
         raceTime_ += dt;
     }
-    Racer& player = racers_[0];
-    if (player.finished || autopilot) {
-        driveAI(player, meta_, dt);
-    } else {
-        player.car.throttle = in.throttle;
-        player.car.brake = in.brake;
-        player.car.steer = in.steer;
-        player.car.handbrake = in.handbrake;
-    }
-    for (size_t i = 1; i < racers_.size(); i++) driveAI(racers_[i], meta_, dt);
+    const int ncp = (int)meta_.checkpoints.size();
     for (size_t i = 0; i < racers_.size(); i++) {
         Racer& r = racers_[i];
+        if (r.gone) continue;
+        if (r.remote) {
+            if (snaps_[i].apply(r, now_)) r.nextCp = std::min(std::max(r.nextCp, 0), std::max(ncp - 1, 0));
+            continue;
+        }
+        if (r.player < 0 || r.finished || autopilot) {
+            driveAI(r, meta_, dt);
+        } else {
+            Input none;
+            const Input& pi = r.player < numInputs ? in[r.player] : none;
+            r.car.throttle = pi.throttle;
+            r.car.brake = pi.brake;
+            r.car.steer = pi.steer;
+            r.car.handbrake = pi.handbrake;
+        }
+    }
+    for (size_t i = 0; i < racers_.size(); i++) {
+        Racer& r = racers_[i];
+        if (r.remote || r.gone) continue;
         if (r.car.R.col(2).z < 0.2f && len(r.car.vel) < 1.0f) r.flipTime += dt;
         else r.flipTime = 0;
-        if (r.flipTime > (i == 0 ? 1.5f : 1.0f) || r.car.pos.z < world_.bmin.z - 5 || r.needsReset) {
+        if (r.flipTime > (r.player >= 0 ? 1.5f : 1.0f) || r.car.pos.z < world_.bmin.z - 5 || r.needsReset) {
             r.needsReset = false;
             placeOnLine(r);
         }
     }
     accum_ += dt;
     const float step = 1.0f / 240.0f;
-    float maxImpact = 0;
+    float maxImpact[kMaxLocal] = {};
     while (accum_ >= step) {
         stepPhysics(step);
-        maxImpact = std::max(maxImpact, player.car.impact);
+        for (int p = 0; p < (int)players_.size(); p++)
+            maxImpact[p] = std::max(maxImpact[p], racers_[players_[p].racer].car.impact);
         accum_ -= step;
     }
     if (state_ != Countdown) updateRace(dt);
-    if (player.finished && state_ == Racing) state_ = Finished;
-    if (cb.audio) cb.audio(player.car.rpm, player.car.throttle, player.car.skid, maxImpact, std::fabs(player.car.speed()));
+    bool allDone = true, anyLocal = false;
+    for (auto& v : players_) {
+        const Racer& r = racers_[v.racer];
+        if (r.player < 0) continue;
+        anyLocal = true;
+        allDone &= r.finished;
+    }
+    if (anyLocal && allDone && state_ == Racing) state_ = Finished;
+    if (cb.audio)
+        for (int p = 0; p < (int)players_.size(); p++) {
+            const Car& c = racers_[players_[p].racer].car;
+            cb.audio(p, c.rpm, c.throttle, c.skid, maxImpact[p], std::fabs(c.speed()));
+        }
 }
 
-void Game::updateCamera(float dt, int w, int h) {
-    const Car& c = racers_[0].car;
+void Game::updateCamera(View& v, float dt, int x, int y, int w, int h) {
+    const Car& c = racers_[v.racer].car;
     V3 fwd = c.R.col(1);
     V3 flatF = norm(V3(fwd.x, fwd.y, 0));
     V3 eye, at;
-    if (camMode_ == 2) {  // bumper
+    if (v.camMode == 2) {  // bumper
         eye = c.pos + fwd * (0.25f * std::max(1.0f, c.boundRadius / 0.42f)) + c.R.col(2) * 0.2f;
         at = eye + fwd * 2.0f;
     } else {
         float scale = std::max(1.0f, c.boundRadius / 0.42f);  // bigger cars (monster trucks) need a wider view
-        float dist = (camMode_ == 0 ? 1.25f : 2.3f) * scale, hgt = (camMode_ == 0 ? 0.45f : 0.9f) * scale;
+        float dist = (v.camMode == 0 ? 1.25f : 2.3f) * scale, hgt = (v.camMode == 0 ? 0.45f : 0.9f) * scale;
         V3 vflat(c.vel.x, c.vel.y, 0);
         V3 dir = len(vflat) > 2.0f && dot(vflat, flatF) > 0 ? norm(vflat * 0.5f + flatF) : flatF;
         V3 want = c.pos - dir * dist + V3(0, 0, hgt);
-        if (!camInit_) { camPos_ = want; camInit_ = true; }
-        camPos_ += (want - camPos_) * (1.0f - std::exp(-dt * 7.0f));
-        float gz = world_.groundHeight(camPos_.x, camPos_.y, camPos_.z + 1.0f);
-        if (camPos_.z < gz + 0.12f) camPos_.z = gz + 0.12f;
-        eye = camPos_;
+        if (!v.camInit) { v.camPos = want; v.camInit = true; }
+        v.camPos += (want - v.camPos) * (1.0f - std::exp(-dt * 7.0f));
+        float gz = world_.groundHeight(v.camPos.x, v.camPos.y, v.camPos.z + 1.0f);
+        if (v.camPos.z < gz + 0.12f) v.camPos.z = gz + 0.12f;
+        eye = v.camPos;
         at = c.pos + V3(0, 0, 0.12f) + flatF * 0.3f;
     }
     M4 view = M4::lookAt(eye, at, V3(0, 0, 1));
-    M4 proj = M4::perspective(camMode_ == 2 ? 1.2f : 1.05f, (float)w / std::max(h, 1), 0.05f, 900.0f);
-    gfx_.beginFrame(w, h, view, proj, eye);
+    float aspect = (float)w / std::max(h, 1);
+    float fovy = v.camMode == 2 ? 1.2f : 1.05f;
+    // Split-screen views are very wide: cap the horizontal field of view instead of stretching it.
+    const float kMaxAspect = 2.2f;
+    if (aspect > kMaxAspect) fovy = 2 * std::atan(std::tan(fovy * 0.5f) * kMaxAspect / aspect);
+    M4 proj = M4::perspective(fovy, aspect, 0.05f, 900.0f);
+    gfx_.beginFrame(x, y, w, h, view, proj, eye);
 }
 
 void Game::draw() {
     for (auto& p : track_.parts) gfx_.drawPart(p, M4(), Pass::Opaque);
     for (size_t i = 0; i < racers_.size(); i++) {
         const Racer& r = racers_[i];
+        if (r.gone) continue;
         CarModel& cm = *carModels_[i];
         M4 body = r.car.bodyMatrix();
         for (Part* p : cm.parts) gfx_.drawPart(*p, body, Pass::Opaque);
@@ -279,6 +354,7 @@ void Game::draw() {
     }
     for (auto& p : track_.parts) gfx_.drawPart(p, M4(), Pass::Blend);
     for (size_t i = 0; i < racers_.size(); i++) {
+        if (racers_[i].gone) continue;
         M4 body = racers_[i].car.bodyMatrix();
         for (Part* p : carModels_[i]->parts) gfx_.drawPart(*p, body, Pass::Blend);
     }
@@ -295,23 +371,27 @@ void Game::draw() {
 }
 
 void Game::render(int w, int h) {
-    if (racers_.empty()) return;
-    updateCamera(camDt_, w, h);
+    if (racers_.empty() || players_.empty()) return;
+    int nv = (int)players_.size();
+    int vh = h / nv;
+    for (int v = 0; v < nv; v++) {
+        updateCamera(players_[v], camDt_, 0, h - (v + 1) * vh, w, vh);  // GL origin is bottom-left; player 0 on top
+        draw();
+    }
     camDt_ = 0;
-    draw();
 }
 
-std::string Game::hudJson() const {
-    if (racers_.empty()) return "{}";
-    const Racer& p = racers_[0];
+std::string Game::hudJson(int pl) const {
+    if (pl < 0 || pl >= (int)players_.size()) return "{}";
+    const Racer& p = racers_[players_[pl].racer];
     char buf[512];
     int cd = state_ == Countdown ? (int)std::ceil(countdown_) : 0;
     snprintf(buf, sizeof buf,
              "{\"speed\":%.1f,\"lap\":%d,\"laps\":%d,\"place\":%d,\"racers\":%d,\"time\":%.2f,\"lapTime\":%.2f,"
-             "\"best\":%.2f,\"last\":%.2f,\"countdown\":%d,\"state\":%d,\"finished\":%s,\"cam\":%d}",
+             "\"best\":%.2f,\"last\":%.2f,\"countdown\":%d,\"state\":%d,\"finished\":%s,\"cam\":%d,\"waiting\":%s}",
              std::fabs(p.car.speed()) * 3.6f, std::max(1, std::min(p.lap, laps_)), laps_, p.place, (int)racers_.size(),
              raceTime_, p.lap > 0 ? raceTime_ - p.lapStart : 0.0f, p.bestLap, p.lastLap, cd, (int)state_,
-             p.finished ? "true" : "false", camMode_);
+             p.finished ? "true" : "false", players_[pl].camMode, waiting ? "true" : "false");
     return buf;
 }
 
@@ -321,13 +401,34 @@ std::string Game::resultsJson() const {
     for (auto& r : racers_) rs.push_back(&r);
     std::sort(rs.begin(), rs.end(), [](const Racer* a, const Racer* b) { return a->place < b->place; });
     for (size_t i = 0; i < rs.size(); i++) {
-        char b[200];
-        snprintf(b, sizeof b, "%s{\"player\":%s,\"place\":%d,\"finished\":%s,\"time\":%.2f,\"best\":%.2f,\"lap\":%d}",
-                 i ? "," : "", rs[i] == &racers_[0] ? "true" : "false", rs[i]->place, rs[i]->finished ? "true" : "false",
-                 rs[i]->finishTime, rs[i]->bestLap, rs[i]->lap);
+        const Racer& r = *rs[i];
+        char b[256];
+        snprintf(b, sizeof b,
+                 "%s{\"i\":%d,\"player\":%s,\"human\":%d,\"remote\":%s,\"gone\":%s,\"place\":%d,\"finished\":%s,"
+                 "\"time\":%.2f,\"best\":%.2f,\"lap\":%d}",
+                 i ? "," : "", (int)(rs[i] - racers_.data()), r.player >= 0 ? "true" : "false", r.player,
+                 r.remote ? "true" : "false", r.gone ? "true" : "false", r.place, r.finished ? "true" : "false",
+                 r.finishTime, r.bestLap, r.lap);
         out += b;
     }
     return out + "]";
+}
+
+bool Game::packState(int racer, double now, float* out) const {
+    if (racer < 0 || racer >= (int)racers_.size()) return false;
+    const Racer& r = racers_[racer];
+    if (r.remote || r.gone) return false;
+    packSnapshot(r, (float)now, out);
+    return true;
+}
+
+void Game::pushSnapshot(int racer, const float* snap, double now) {
+    if (racer < 0 || racer >= (int)racers_.size() || !racers_[racer].remote || racers_[racer].gone) return;
+    snaps_[racer].push(snap, now);
+}
+
+void Game::removeRacer(int racer) {
+    if (racer >= 0 && racer < (int)racers_.size()) racers_[racer].gone = true;
 }
 
 }  // namespace bsr

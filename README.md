@@ -7,10 +7,11 @@ at runtime, so the data files are served unmodified. See [FORMATS.md](FORMATS.md
 
 What works: all 6 tracks, all 11 car classes with their 12 skins each, AI opponents on the original racing lines,
 checkpoints/laps/positions, the original sky/fog weather presets, engine/skid/impact sounds, music, keyboard,
-gamepad and touch controls.
+gamepad and touch controls, two-player split-screen, and online races for up to 8 players (new; the original
+only had local multiplayer).
 
 Not reproduced: the original `bamms.dll` multibody physics (replaced by a raycast-suspension car model tuned
-to the original top speeds), menus/career mode, rain particles, replays, split-screen.
+to the original top speeds), menus/career mode, rain particles, replays.
 
 ## Build
 
@@ -45,6 +46,24 @@ python3 tools/devserver.py 8000
 | Pause | P or Esc | |
 | Debug lines (checkpoints, AI line) | F2 | |
 
+Split screen: player 1 uses WASD, Space (handbrake), C (camera) and R (reset); player 2 uses the arrows, Right Shift,
+`.` and Backspace. A single gamepad goes to player 2; with two or more, pad 1 is player 1 and pad 2 player 2.
+
+## Online multiplayer
+
+Pick **Online** in the menu, enter a name and **Create room**. Share the 4-letter code or **Copy invite link**;
+friends pick **Join** with the code. The host chooses track, class, weather, AI cars and laps; everyone chooses
+their own skin. Up to 8 players per room.
+
+The rooms run in `tools/devserver.py` (WebSocket at `/ws`, Python standard library only). To play with others,
+serve on all interfaces and open the port (or run it on a server, behind an HTTPS proxy for `wss://`):
+
+```sh
+python3 tools/devserver.py 8000 --host 0.0.0.0
+```
+
+A page served from elsewhere (e.g. static hosting) can point at a relay with `?server=wss://host/ws`.
+
 ## Layout
 
 ```
@@ -52,7 +71,8 @@ src/formats.*   decryption and parsers: .fsp textures, .tga, .fso scenes, .fst c
 src/render.*    WebGL2/GLES3 renderer: lightmaps, env maps, alpha, fog
 src/physics.*   collision grid over the .fst mesh, raycast-suspension car with collision spheres
 src/race.*      meta splines (grid, checkpoints, AI lines), AI driver
-src/game.*      race flow, camera, drawing (platform independent)
+src/game.*      race flow, cameras/split-screen, drawing (platform independent)
+src/netsync.*   online play: car state snapshots and interpolation of remote cars
 src/main.cpp    browser glue: input, canvas, JS callbacks
 web/            index.html, game.js (menu, loader, HUD, audio), style.css
 tools/pack.py   data packer; tools/bsrfmt.py Python format library

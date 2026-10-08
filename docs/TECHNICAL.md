@@ -9,7 +9,8 @@ The project runs *Big Scale Racing* (BumbleBeast, 2002, Windows/Direct3D 7) in a
 | Area | Reproduced | Not reproduced |
 | --- | --- | --- |
 | Content | 6 tracks, 11 car classes, 12 skins per class, 6 weather presets | Career mode, original menus, prize ceremonies |
-| Gameplay | Grid starts, checkpoints, laps, positions, results, AI opponents on the original racing lines | Pit stops, false starts, split-screen, replays |
+| Gameplay | Grid starts, checkpoints, laps, positions, results, AI opponents on the original racing lines, two-player split-screen | Pit stops, false starts, replays |
+| Multiplayer (new) | Online races for up to 8 players through a WebSocket relay, with AI cars run by the host | — |
 | Simulation | New raycast-suspension car model tuned to the original top speeds | The original `bamms.dll` multibody physics |
 | Presentation | Textures, lightmaps, env maps, sky domes, fog, engine/skid/impact sounds, MP3 music | Rain particles, smoke, TV cameras |
 | Input | Keyboard, gamepad, touch | Force feedback |
@@ -136,9 +137,11 @@ Only `pack.py` touches the files before the browser, and it only copies them; de
 | Renderer | `src/render.h/.cpp` | Builds GPU meshes from FSO nodes, texture cache, GLES3/WebGL2 shaders and draw passes |
 | Physics | `src/physics.h/.cpp` | Collision grid over the `.fst` mesh, raycast-suspension car, chassis spheres, car-to-car contact |
 | Race | `src/race.h/.cpp` | Meta splines (grid, checkpoints, AI lines), AI driver, gate crossing |
-| Game | `src/game.h/.cpp` | Race lifecycle, standings, camera, draw order; callbacks for HUD, audio and events |
+| Game | `src/game.h/.cpp` | Race lifecycle, standings, per-player cameras and viewports, draw order; callbacks for audio and events |
+| Net sync | `src/netsync.h/.cpp` | Packs a car's state into a snapshot; buffers and interpolates the snapshots of remote cars |
 | Browser glue | `src/main.cpp` | WebGL2 context, keyboard/gamepad/touch, canvas sizing, exported `bsr_*` API |
-| Front-end | `web/index.html`, `game.js`, `style.css` | Menu, data loader, HUD, Web Audio, touch controls |
+| Front-end | `web/index.html`, `game.js`, `style.css` | Menu, data loader, HUD, Web Audio, touch controls, online lobby and state relay |
+| Dev server | `tools/devserver.py` | Static files, the multiplayer WebSocket relay (`/ws`), smoke-test endpoints |
 | Harness | `tools/harness/harness.cpp` | Same core on Linux with EGL surfaceless + Mesa; autopilot races and screenshots |
 
 `Game` has no Emscripten dependency: everything platform-specific reaches it through `Input`, `Callbacks` and `render(w, h)`. That is what lets one codebase be validated natively and shipped to the web.
@@ -222,14 +225,31 @@ The car reports `rpm`, `skid` and `impact` each step for the audio layer.
 
 ### Race flow
 
-- **States:** Countdown (4 s, cars held) → Racing → Finished (player done; AI keeps driving and the player switches to autopilot).
+- **States:** Countdown (4 s, cars held; online it is held until every player has loaded) → Racing → Finished (every local player done; the rest keep driving and finished players switch to autopilot).
+- **Roles:** each car on the grid is a local player (0 or 1), an AI car simulated here, or a remote car. `Game::start` takes them as a string, one character per car (`"01aaa"` = split-screen with three AI cars; `"r0ra"` = online, the second car is ours and the fourth is an AI car we host).
 - **Laps:** each racer must cross its next checkpoint gate in order (2D segment intersection between frames); crossing gate 01 starts a lap, and passing it after the last lap finishes the race.
 - **Standings:** finishers by finish time, then laps × 1000 + checkpoints × 10 − distance to the next gate.
 - **Resets:** upside down for 1.5 s (player) or 1 s (AI), or falling below the track → respawn on the racing line; the player can press R.
 
+### Split-screen
+
+With two local players `Game::render` draws the scene twice, into the top and bottom halves of the canvas. Each player has a camera, HUD and engine/skid sound loop. The horizontal field of view is capped so the wide half-height views don't fisheye. Player 1 drives with WASD, Space, C and R; player 2 with the arrows, Right Shift, `.` and Backspace. With one gamepad connected, it goes to player 2; with two or more, they go to the players in order.
+
+### Online multiplayer
+
+Each browser simulates only its own car; the host also simulates the AI cars. There is no authoritative server: `tools/devserver.py` only manages rooms and forwards messages.
+
+1. **Lobby.** A player creates a room and gets a 4-letter code (or an invite link `?room=CODE`). Up to 8 can join. The host's track, class, weather, AI count and laps are mirrored to everyone; each player picks their own skin.
+2. **Start.** The host sends the grid (players in join order at the back, AI cars in front) and a race id. Every client loads the track, calls `bsr_start` with its own role string and holds the countdown (`bsr_set_waiting`) until the host sends `go`, once everyone reports ready or after 45 s.
+3. **Racing.** Every 50 ms each client sends the cars it simulates as one binary packet: `float32 [raceId, count, (racer, 31 floats)…]` with position, orientation quaternion, velocities, wheel steer/compression/spin and lap progress. Receivers keep a buffer per car and draw it 100 ms in the past, interpolated between snapshots (`SnapshotBuffer`). Lap and finish state come from the owner, who sees every checkpoint crossing.
+4. **Contact.** Car-to-car collisions run on both machines, but each side only moves its own car (`collideCars(a, b, moveA, moveB)`), so two players bumping each other both feel it without fighting over the other car.
+5. **Leaving.** A player who leaves or disconnects is removed from everyone's race; if the host leaves, the AI cars go too and the longest-standing player becomes host. Online races can't be paused.
+
+The relay forwards states between players, so latency is two hops through the server. The interpolation delay hides jitter and short losses (tested natively: at 9.4 m/s with 15 ms jitter and 5 % loss, remote cars stay within 3 cm of the true delayed path).
+
 ## Web front-end
 
-`web/game.js` owns everything outside the 3D view — menu, data loading, HUD, audio and touch input — and talks to the engine through nine exported C functions and three callbacks.
+`web/game.js` owns everything outside the 3D view — menu, data loading, HUD, audio and touch input — and talks to the engine through exported C functions and three callbacks.
 
 ### Startup and loading
 
@@ -243,17 +263,21 @@ The car reports `rpm`, `skid` and `impact` each step for the audio layer.
 | Export | Arguments | Purpose |
 | --- | --- | --- |
 | `bsr_init` | — | Create the context and start the main loop; returns 0 without WebGL2 |
-| `bsr_start` | track, class, skins (CSV, player first), opponents, laps, top speed (km/h), weather preset | Load and begin a race; returns 0 on failure |
-| `bsr_touch` | steer, throttle, brake | Analog input from the touch controls |
+| `bsr_start` | track, class, skins (CSV, one per car), opponents, laps, top speed (km/h), weather preset, roles | Load and begin a race; returns the number of cars, 0 on failure |
+| `bsr_touch` | steer, throttle, brake | Analog input from the touch controls (player 1) |
 | `bsr_set_paused` | 0/1 | Pause or resume |
-| `bsr_camera`, `bsr_reset_car`, `bsr_autopilot`, `bsr_stop` | — / 0/1 | Camera cycle, respawn, AI-driven player, end race |
-| `bsr_results` | — | Standings JSON: place, finished, time, best lap |
+| `bsr_camera`, `bsr_reset_car` | player | Camera cycle, respawn |
+| `bsr_autopilot`, `bsr_stop` | 0/1 / — | AI-driven players, end race |
+| `bsr_results` | — | Standings JSON: car index, local player, remote/left, place, finished, time, best lap |
+| `bsr_set_online`, `bsr_set_waiting` | 0/1 | Disable pausing; hold the countdown |
+| `bsr_snapshot_floats`, `bsr_get_state`, `bsr_put_state` | car, float buffer | Read the state of a car simulated here; feed a snapshot of a remote car |
+| `bsr_remove_racer` | car | A remote player left: hide the car, rank it last unless finished |
 
 | Callback (on `Module`) | Rate | Payload |
 | --- | --- | --- |
-| `onHud(json)` | 20 Hz | Speed, lap/laps, place/racers, race and lap times, countdown, state |
-| `onAudio(rpm, throttle, skid, impact, speed)` | Every frame | Drives the sound loops |
-| `onEvent(name)` | On change | `beep`, `go`, `lap`, `lastlap`, `finish`, `paused`, `resumed` |
+| `onHud(json, player)` | 20 Hz per local player | Speed, lap/laps, place/racers, race and lap times, countdown, state, waiting |
+| `onAudio(rpm, throttle, skid, impact, speed, player)` | Every frame | Drives the sound loops |
+| `onEvent(name)` | On change | `beep`, `go`, `lap:<player>`, `lastlap:<player>`, `finish:<player>`, `paused`, `resumed` |
 
 ### Audio
 
@@ -269,7 +293,7 @@ Audio is decoded in JavaScript, not WASM. `.fsw` files are parsed as RIFF, the `
 
 ### Input and frame loop
 
-- Keyboard: arrows/WASD, Space handbrake, C camera, R reset, P or Esc pause, F2 debug lines. Steering ramps at 3.5/s (6/s back to centre) to mimic an RC transmitter.
+- Keyboard: arrows/WASD, Space handbrake, C camera, R reset, P or Esc pause, F2 debug lines (split-screen bindings above). Steering ramps at 3.5/s (6/s back to centre) to mimic an RC transmitter.
 - Gamepad: left stick, RT/LT analog, A/X/B buttons; the pad state is sampled before counting pads (the reverse order crashes in Emscripten).
 - Touch: a steering pad and gas/brake buttons, shown only on touch devices.
 - Each frame resizes the canvas to CSS size × devicePixelRatio, runs `Game::update` (physics substeps at 240 Hz) and renders. A hidden tab pauses the race.
@@ -285,12 +309,12 @@ bsdtar -xf BIGSCALERACING01.iso -C iso/                  # 1. disc image -> inst
 unshield -d game x iso/data1.cab                          # 2. InstallShield cabinet -> game files
 python3 tools/pack.py game/Program_Executable_Files_Group/Data web   # 3. copy needed files + manifest
 ./build.sh                                                # 4. em++ -O2 -> web/bsr.js + web/bsr.wasm
-python3 tools/devserver.py 8000                           # 5. serve web/ at http://localhost:8000
+python3 tools/devserver.py 8000                           # 5. serve web/ at http://localhost:8000 (--host 0.0.0.0 for LAN/online)
 ```
 
 `tools/pack.py` resolves every texture the selected FSOs reference (track folder, then `Maps_high`, then `Maps_cars`), collects the 12 skins per class from the `.fsm` files, the weather sky textures, sounds and music, and copies them with lowercased paths (the original ran on a case-insensitive filesystem). Files are copied byte for byte; no conversion happens at build time.
 
-Key Emscripten flags: `-sUSE_WEBGL2 -sMIN_WEBGL_VERSION=2 -sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=128MB -sFORCE_FILESYSTEM -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,FS,UTF8ToString`.
+Key Emscripten flags: `-sUSE_WEBGL2 -sMIN_WEBGL_VERSION=2 -sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=128MB -sFORCE_FILESYSTEM -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,FS,UTF8ToString,HEAPF32` (`HEAPF32` carries network snapshots).
 
 ### Tests
 
