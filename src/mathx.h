@@ -48,6 +48,46 @@ struct M3 {
     }
 };
 
+// Unit quaternion, used to send and interpolate orientations over the network.
+struct Q {
+    float x = 0, y = 0, z = 0, w = 1;
+    static Q fromM3(const M3& R) {
+        const float* m = R.m;
+        Q q;
+        float tr = m[0] + m[4] + m[8];
+        if (tr > 0) {
+            float s = std::sqrt(tr + 1.0f) * 2;
+            q.w = 0.25f * s; q.x = (m[7] - m[5]) / s; q.y = (m[2] - m[6]) / s; q.z = (m[3] - m[1]) / s;
+        } else if (m[0] > m[4] && m[0] > m[8]) {
+            float s = std::sqrt(1.0f + m[0] - m[4] - m[8]) * 2;
+            q.w = (m[7] - m[5]) / s; q.x = 0.25f * s; q.y = (m[1] + m[3]) / s; q.z = (m[2] + m[6]) / s;
+        } else if (m[4] > m[8]) {
+            float s = std::sqrt(1.0f + m[4] - m[0] - m[8]) * 2;
+            q.w = (m[2] - m[6]) / s; q.x = (m[1] + m[3]) / s; q.y = 0.25f * s; q.z = (m[5] + m[7]) / s;
+        } else {
+            float s = std::sqrt(1.0f + m[8] - m[0] - m[4]) * 2;
+            q.w = (m[3] - m[1]) / s; q.x = (m[2] + m[6]) / s; q.y = (m[5] + m[7]) / s; q.z = 0.25f * s;
+        }
+        return q;
+    }
+    M3 toM3() const {
+        M3 r;
+        r.m[0] = 1 - 2 * (y * y + z * z); r.m[1] = 2 * (x * y - z * w);     r.m[2] = 2 * (x * z + y * w);
+        r.m[3] = 2 * (x * y + z * w);     r.m[4] = 1 - 2 * (x * x + z * z); r.m[5] = 2 * (y * z - x * w);
+        r.m[6] = 2 * (x * z - y * w);     r.m[7] = 2 * (y * z + x * w);     r.m[8] = 1 - 2 * (x * x + y * y);
+        return r;
+    }
+    static Q nlerp(const Q& a, Q b, float t) {
+        if (a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w < 0) { b.x = -b.x; b.y = -b.y; b.z = -b.z; b.w = -b.w; }
+        Q o;
+        o.x = lerpf(a.x, b.x, t); o.y = lerpf(a.y, b.y, t); o.z = lerpf(a.z, b.z, t); o.w = lerpf(a.w, b.w, t);
+        float l = std::sqrt(o.x * o.x + o.y * o.y + o.z * o.z + o.w * o.w);
+        if (l < 1e-9f) return a;
+        o.x /= l; o.y /= l; o.z /= l; o.w /= l;
+        return o;
+    }
+};
+
 // Column-major 4x4 for GL.
 struct M4 {
     float m[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};

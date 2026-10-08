@@ -88,6 +88,7 @@ private:
     void applyImpulse(const V3& at, const V3& J);
 };
 
-void collideCars(Car& a, Car& b);
+// moveA/moveB false: that car is only an obstacle (its state comes from elsewhere, e.g. the network).
+void collideCars(Car& a, Car& b, bool moveA = true, bool moveB = true);
 
 }  // namespace bsr

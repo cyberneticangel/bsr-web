@@ -32,6 +32,9 @@ struct TrackMeta {
 struct Racer {
     Car car;
     bool ai = true;
+    int player = -1;        // local human index (split-screen), -1 for AI and remote cars
+    bool remote = false;    // simulated on another machine; state arrives as network snapshots
+    bool gone = false;      // remote player left the race: not drawn, not collided
     int aiLine = 0;
     float aiSkill = 1.0f;
     int pathIdx = 0;

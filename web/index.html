@@ -10,19 +10,36 @@
 <canvas id="canvas" tabindex="-1"></canvas>
 
 <div id="hud" class="hidden">
-  <div class="hud-tl">
-    <div class="pos"><span id="h-place">1</span><small>/<span id="h-racers">1</span></small></div>
-    <div class="lap">LAP <span id="h-lap">1</span>/<span id="h-laps">3</span></div>
+  <div class="hud-view" id="hud-p1">
+    <div class="hud-tl">
+      <div class="pos"><span id="h-place">1</span><small>/<span id="h-racers">1</span></small></div>
+      <div class="lap">LAP <span id="h-lap">1</span>/<span id="h-laps">3</span></div>
+    </div>
+    <div class="hud-tr">
+      <div>TIME <span id="h-time">0:00.00</span></div>
+      <div>LAP <span id="h-laptime">0:00.00</span></div>
+      <div>BEST <span id="h-best">-:--.--</span></div>
+    </div>
+    <div class="hud-br"><span id="h-speed">0</span><small>km/h</small></div>
+    <div id="h-countdown" class="countdown"></div>
+    <div id="h-msg" class="msg"></div>
+    <div id="h-keys" class="hud-keys">↑↓←→ drive · Space handbrake · C camera · R reset · P pause</div>
   </div>
-  <div class="hud-tr">
-    <div>TIME <span id="h-time">0:00.00</span></div>
-    <div>LAP <span id="h-laptime">0:00.00</span></div>
-    <div>BEST <span id="h-best">-:--.--</span></div>
+  <div class="hud-view" id="hud-p2">
+    <div class="hud-tl">
+      <div class="pos"><span id="h2-place">1</span><small>/<span id="h2-racers">1</span></small></div>
+      <div class="lap">LAP <span id="h2-lap">1</span>/<span id="h2-laps">3</span></div>
+    </div>
+    <div class="hud-tr">
+      <div>TIME <span id="h2-time">0:00.00</span></div>
+      <div>LAP <span id="h2-laptime">0:00.00</span></div>
+      <div>BEST <span id="h2-best">-:--.--</span></div>
+    </div>
+    <div class="hud-br"><span id="h2-speed">0</span><small>km/h</small></div>
+    <div id="h2-countdown" class="countdown"></div>
+    <div id="h2-msg" class="msg"></div>
+    <div id="h2-keys" class="hud-keys">↑↓←→ drive · Right Shift handbrake · . camera · Backspace reset</div>
   </div>
-  <div class="hud-br"><span id="h-speed">0</span><small>km/h</small></div>
-  <div id="h-countdown" class="countdown"></div>
-  <div id="h-msg" class="msg"></div>
-  <div class="hud-keys">↑↓←→ drive · Space handbrake · C camera · R reset · P pause</div>
 </div>
 
 <div id="touch" class="hidden">
@@ -36,11 +53,27 @@
 <div id="menu" class="panel">
   <h1>BIG SCALE RACING</h1>
   <p class="sub">WebAssembly port · original BumbleBeast data</p>
+  <div class="row"><label>Mode</label><div id="modes" class="choices">
+    <button data-v="single">Single</button><button data-v="split">Split screen</button><button data-v="online">Online</button>
+  </div></div>
+  <div id="online" class="hidden">
+    <div id="online-join">
+      <div class="row"><label>Name</label><input id="net-name" type="text" maxlength="20" placeholder="Player" autocomplete="nickname"></div>
+      <div class="row"><label>Room</label><input id="net-code" type="text" maxlength="4" placeholder="CODE" autocomplete="off">
+        <button id="net-join">Join</button><button id="net-create">Create room</button></div>
+    </div>
+    <div id="online-room" class="hidden">
+      <div class="row"><label>Room</label><b id="net-room" class="room-code"></b>
+        <button id="net-invite">Copy invite link</button><button id="net-leave">Leave</button></div>
+      <ul id="net-players"></ul>
+    </div>
+  </div>
   <div class="row"><label>Track</label><div id="tracks" class="choices"></div></div>
   <div class="row"><label>Class</label><select id="cls"></select></div>
   <div class="row"><label>Weather</label><select id="weather"></select></div>
-  <div class="row"><label>Skin</label><div id="skins" class="choices skins"></div></div>
-  <div class="row"><label>Opponents</label><input id="opp" type="range" min="0" max="7" value="5"><span id="opp-v">5</span></div>
+  <div class="row"><label id="skin-label">Skin</label><div id="skins" class="choices skins"></div></div>
+  <div class="row hidden" id="row-skin2"><label>P2 skin</label><div id="skins2" class="choices skins"></div></div>
+  <div class="row"><label id="opp-label">Opponents</label><input id="opp" type="range" min="0" max="7" value="5"><span id="opp-v">5</span></div>
   <div class="row"><label>Laps</label><input id="laps" type="range" min="1" max="10" value="3"><span id="laps-v">3</span></div>
   <div class="row"><label>Music</label><input id="music" type="checkbox" checked></div>
   <button id="go" class="big">RACE</button>
@@ -48,7 +81,7 @@
 </div>
 
 <div id="pause" class="panel hidden">
-  <h2>PAUSED</h2>
+  <h2 id="pause-title">PAUSED</h2>
   <button id="resume" class="big">RESUME</button>
   <button id="restart">RESTART</button>
   <button id="quit">QUIT TO MENU</button>
@@ -57,6 +90,7 @@
 <div id="results" class="panel hidden">
   <h2>RESULTS</h2>
   <table id="res-table"></table>
+  <p id="res-note" class="sub"></p>
   <button id="again" class="big">RACE AGAIN</button>
   <button id="tomenu">MENU</button>
 </div>
