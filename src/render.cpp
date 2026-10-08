@@ -291,16 +291,32 @@ void Renderer::buildModel(const FSO& fso, const std::string& texDir, Model& out,
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx.size() * 2, idx.data(), GL_STATIC_DRAW);
         glBindVertexArray(0);
+        part.vao = vao;
+        part.vbo = vbo;
+        part.ibo = ibo;
         out.parts.push_back(std::move(part));
     }
 }
 
-void Renderer::beginFrame(int w, int h, const M4& view, const M4& proj, const V3& eye) {
+void Renderer::release(Model& m) {
+    for (Part& p : m.parts) {
+        glDeleteVertexArrays(1, &p.vao);
+        glDeleteBuffers(1, &p.vbo);
+        glDeleteBuffers(1, &p.ibo);
+    }
+    m.parts.clear();
+}
+
+void Renderer::beginFrame(int x, int y, int w, int h, const M4& view, const M4& proj, const V3& eye) {
     viewProj_ = proj * view;
     eye_ = eye;
-    glViewport(0, 0, w, h);
+    glViewport(x, y, w, h);
+    glEnable(GL_SCISSOR_TEST);  // glClear ignores the viewport
+    glScissor(x, y, w, h);
     glClearColor(fog_[0], fog_[1], fog_[2], 1);
+    glDepthMask(GL_TRUE);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDisable(GL_SCISSOR_TEST);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
     glUseProgram(prog_);

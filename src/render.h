@@ -28,6 +28,7 @@ struct Batch {
 
 struct Part {  // a mesh node, LOD 0
     std::string name;
+    GLuint vao = 0, vbo = 0, ibo = 0;  // owned; freed by Renderer::release
     M4 local;  // accumulated transform within the model
     std::vector<Batch> batches;
     V3 bmin, bmax;
@@ -42,10 +43,13 @@ struct Model {
 class Renderer {
 public:
     bool init();
-    void beginFrame(int w, int h, const M4& view, const M4& proj, const V3& eye);
+    // Clears and draws into the viewport (x, y, w, h); several per frame for split-screen.
+    void beginFrame(int x, int y, int w, int h, const M4& view, const M4& proj, const V3& eye);
     // Builds GPU geometry for every mesh node. skip(name) can drop helper nodes.
     void buildModel(const FSO& fso, const std::string& texDir, Model& out,
                     const std::map<std::string, std::string>& texOverride = {});
+    // Frees the model's GPU buffers (textures stay in the cache) and empties it.
+    void release(Model& m);
     void drawPart(const Part& p, const M4& world, Pass pass, float alphaMul = 1.0f);
     Texture texture(const std::string& name, const std::string& dir);
     void setSun(const V3& dir, float amb, float diff) { sunDir_ = norm(dir); amb_ = amb; diff_ = diff; }
