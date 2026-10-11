@@ -115,7 +115,9 @@ Bezier). Names:
 * `m_meta_checkpointNN` – gate line across the track; `01` is start/finish; names ending in `P` are pit-lane only
 * `m_meta_aii01..06` – closed AI racing lines (06 is an alternate/pit line)
 * `m_meta_aisl01`, `m_meta_aisr01` – left/right track edges
-* `m_meta_pitposNN`, `podiumposNN`, `prizeposNN`
+* `m_meta_podiumpos01..08` – 2-knot line spanning a car, tail to nose: 01–03 on the podium steps, 04–08 in front
+* `m_meta_prizepos01..03` – where the gold, silver and bronze cups (`prizes_track.fso`, parts `1`–`3`) stand
+* `m_meta_pitposNN`
 
 ## `.fst` collision (`FST_Terrain`)
 
@@ -133,9 +135,45 @@ XORed; 47 records of 2424 bytes: `char name[64]`, `u8 fogEnable` at 64, `float f
 `float fogStart, fogEnd` at 84, `float light[3]` at 140, 8 texture-swap pairs (`char from[64]` at 164 + 64·i,
 `char to[64]` at 676 + 64·i; e.g. `do_domereplace → do_T_512`), environment map name at 2348.
 
+## `<track>_weather_<category>.bin`
+
+XORed, 1344 bytes; what a menu weather category (`sunny`, `cloudy`, `sunset`, `wet`, `rain`) means on a track.
+Slots past the counts hold stale data.
+
+```
+u32 1, u32 category (0 sunny, 1 rain, 2 sunset, 3 wet, 4 cloudy), u32 swapCount
+char from[10][32] @0x0C; char to[10][32] @0x14C      // texture swaps, e.g. fx_shadowmach -> fx_shadowmachwet
+char carShadowMap[32] @0x2BC, sprayMap[32] @0x2DC    // e.g. shadowmaprain, spraymaprain
+u32 presetCount @0x2FC; char preset[16][32] @0x300   // weather.bin presets to pick from
+float weight[16] @0x500
+```
+
+Preset names encode the conditions: `..._W_R_T` = wet track, rain, thunder (`NW`/`NR`/`NT` = not).
+
+## `<track>_cams.bin`
+
+XORed; 220-byte camera records:
+
+```
+char name[32]                      // follow, follow2, follow3, Bumper, tower, towerpractice, 1_1.., podium
+u32 type @0x20                     // 1 fixed position looking at the car, 2 on the car (bumper), 3 chase
+u32 use @0x24                      // 1 race, 2 TV/replay, 3 practice/podium
+float near @0x2C, far @0x30, fov @0x34    // fov in radians (e.g. follow 1.61)
+char target[32] @0x44              // "m_body"
+float range0 @0x64, range1 @0x68   // TV cameras: metres along the racing line where this camera takes over
+float zoom[3] @0x70
+float pos[3] @0x7C                 // fixed cameras (tower: the driver stand, ~5 m up)
+float offset[3] @0xCC              // chase cameras: -back, up, look-at height (follow: -2.8, 1.1, 0.4)
+```
+
 ## Other
 
 * `Data/hud.ini` – speedometer scale per class (km/h); used as top speed.
-* `Data/Languages/English.bin` – XORed string table (`u32 id`, key, text).
+* `Data/Languages/English.bin` – XORed string table (`u32 id`, key, text). Has the original's menus: race
+  lengths (1–20 min), ghost modes, Cup/Open race types, the 12 team names (skin N = team N) and the championships.
+* `Data/Music.ini` – music per game state (`Menus`, `Finish`, `Podium`, `Nopodium`) and the on-track genres
+  (surf, rock, dance). Every on-track song exists as `.fs3` (stereo MP3) and `.fsw` (mono 11 kHz WAV, for
+  "localized" music played from the trackside speakers `m_speakerrond*` / `m_speakervierkant*`).
+* `Maps_high/hud_*.fsp`, `Font_54321.fsp` – the HUD: label bars, speed/rev meters, countdown digits.
 * `Cars/class_*.bin` – XORed (read in several chunks); per-class sound/HUD/effect asset names.
 * `Cars/<track>/bamms_<class>_{mid,high}.bin` – multibody model definitions for `bamms.dll` (not used by this port).

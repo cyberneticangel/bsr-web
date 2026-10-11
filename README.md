@@ -5,13 +5,17 @@ The engine is new C++ compiled to WebAssembly (WebGL 2). It decodes the game's o
 at runtime, so the data files are served unmodified. See [FORMATS.md](FORMATS.md) for the reverse-engineered formats and
 [docs/TECHNICAL.md](docs/TECHNICAL.md) for the full technical documentation.
 
-What works: all 6 tracks, all 11 car classes with their 12 skins each, AI opponents on the original racing lines,
-checkpoints/laps/positions, the original sky/fog weather presets, engine/skid/impact sounds, music, keyboard,
-gamepad and touch controls, two-player split-screen, and online races for up to 8 players (new; the original
-only had local multiplayer).
+What works: all 6 tracks, all 11 car classes with their 12 team skins each (shown as rendered previews), AI
+opponents on the original racing lines, checkpoints/laps/positions with missed-checkpoint warnings, races by laps or
+by time, Cup and Open (mixed-class) races, practice with a ghost of your best or last lap, the championships
+(a cup per class plus the BSR championship) and the podium ceremony, the original's weather categories on every
+track including rain and thunder (or Random), tire smoke, skid marks and spray, the original HUD graphics (scalable),
+the original's cameras (follow, tower, TV), the race announcer (three voices), menu/podium/race music in stereo or
+"localized" from the trackside speakers, keyboard, gamepad and touch controls, two-player split-screen, and online
+races for up to 8 players (new; the original only had local multiplayer).
 
 Not reproduced: the original `bamms.dll` multibody physics (replaced by a raycast-suspension car model tuned
-to the original top speeds), menus/career mode, rain particles, replays.
+to the original top speeds), the original's menu look, replays, bonus tracks.
 
 ## Build
 
@@ -32,7 +36,8 @@ python3 tools/pack.py game/Program_Executable_Files_Group/Data web
 python3 tools/devserver.py 8000
 ```
 
-`web/data` is about 140 MB in total; a race loads only one track's files (9–18 MB) plus the shared cars and sounds.
+`web/data` is about 370 MB in total (mostly music); a race loads only one track's files (9–18 MB), its weather
+(up to 1.5 MB), one song, and the shared cars and sounds. The menu loads the selected class (~3 MB) for its previews.
 
 ## Controls
 
@@ -44,6 +49,7 @@ python3 tools/devserver.py 8000
 | Camera (follow / follow 2 / follow 3 / bumper / tower / TV) | C | |
 | Reset car onto the track | R | |
 | Pause | P or Esc | |
+| Standings / players in the room | Tab (hold) | |
 | Debug lines (checkpoints, AI line) | F2 | |
 
 Split screen: player 1 uses WASD, Space (handbrake), C (camera) and R (reset); player 2 uses the arrows, Right Shift,
@@ -52,8 +58,9 @@ Split screen: player 1 uses WASD, Space (handbrake), C (camera) and R (reset); p
 ## Online multiplayer
 
 Pick **Online** in the menu, enter a name and **Create room**. Share the 4-letter code or **Copy invite link**;
-friends pick **Join** with the code. The host chooses track, class, weather, AI cars and laps; everyone chooses
-their own skin. Up to 8 players per room.
+friends pick **Join** with the code. The host chooses track, class, weather, race type, AI cars and length;
+everyone chooses their own team (and in open races their own class). Up to 8 players per room. Hold Tab to see
+everyone in the room with their ping; other players' cars carry a name tag with a connection dot.
 
 The rooms run in `tools/devserver.py` (WebSocket at `/ws`, Python standard library only). To play with others,
 serve on all interfaces and open the port (or run it on a server, behind an HTTPS proxy for `wss://`):
@@ -73,11 +80,13 @@ src/physics.*   collision grid over the .fst mesh, raycast-suspension car with c
 src/race.*      meta splines (grid, checkpoints, AI lines), AI driver
 src/game.*      race flow, cameras/split-screen, drawing (platform independent)
 src/netsync.*   online play: car state snapshots and interpolation of remote cars
+src/effects.*   rain, tire smoke, spray, skid marks
 src/main.cpp    browser glue: input, canvas, JS callbacks
 web/            index.html, game.js (menu, loader, HUD, audio), style.css
 tools/pack.py   data packer; tools/bsrfmt.py Python format library
 tools/harness/  native headless test (EGL + Mesa): races with all cars on autopilot, writes screenshots
 tools/nodetest.js  browser-layer integration test in Node (stub DOM/WebGL/WebAudio, real wasm)
+tools/browsershot.js  drives a real headless Firefox (WebDriver BiDi) through scripted steps and screenshots
 ```
 
 ## Tests
@@ -86,4 +95,7 @@ tools/nodetest.js  browser-layer integration test in Node (stub DOM/WebGL/WebAud
 tools/harness/build.sh
 OPP=7 LAPS=3 tools/harness/harness web/data baanbreker pro_std /tmp/shots 150 5 20   # race + screenshots at 5s, 20s
 node tools/nodetest.js mach pro_std 50                                                # menu → load → race → finish
+node tools/nodetest.js mach pro_std 110 time                                          # also: practice, open
+CHAOS=3 tools/harness/harness web/data de_sluis expert_hop /tmp/shots 60              # erratic driving: clipping stats
+node tools/browsershot.js http://localhost:8000/ /tmp/shots '[{"until":"manifest"},{"shot":"menu"}]'  # needs devserver
 ```

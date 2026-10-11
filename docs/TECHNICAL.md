@@ -8,11 +8,11 @@ The project runs *Big Scale Racing* (BumbleBeast, 2002, Windows/Direct3D 7) in a
 
 | Area | Reproduced | Not reproduced |
 | --- | --- | --- |
-| Content | 6 tracks, 11 car classes, 12 skins per class, 6 weather presets | Career mode, original menus, prize ceremonies |
-| Gameplay | Grid starts, checkpoints, laps, positions, results, AI opponents on the original racing lines, two-player split-screen | Pit stops, false starts, replays |
+| Content | 6 tracks, 11 car classes, 12 team skins per class, the original weather categories (incl. rain) on every track, 3 announcer voices, all music | Original menu graphics, bonus tracks |
+| Gameplay | Grid starts, checkpoints (with missed-checkpoint warnings), laps or timed races, Cup and Open races, positions, results, AI opponents on the original racing lines, practice with ghost laps, championships with unlocks, podium ceremony, two-player split-screen | Pit stops, false starts, replays |
 | Multiplayer (new) | Online races for up to 8 players through a WebSocket relay, with AI cars run by the host | — |
 | Simulation | New raycast-suspension car model tuned to the original top speeds | The original `bamms.dll` multibody physics |
-| Presentation | Textures, lightmaps, env maps, sky domes, fog, engine/skid/impact sounds, MP3 music | Rain particles, smoke, TV cameras |
+| Presentation | Textures, lightmaps (incl. wet/sunset variants), env maps, sky domes, fog, rain, tire smoke, spray, skid marks, the original HUD graphics and cameras (follow, tower, TV), engine/skid/impact/weather sounds, stereo or localized music | Engine smoke, `g_reflection` wet-track mirrors |
 | Input | Keyboard, gamepad, touch | Force feedback |
 
 The code lives in `bsr-web/`: `src/` (engine), `web/` (page, loader, HUD, audio), `tools/` (data packer, format library, tests). `README.md` covers building; `FORMATS.md` is the short format reference this document expands on.
@@ -112,12 +112,18 @@ Magic `FST_Terrain\0`, `u32 vertexCount, triCount`, `float[3]` vertices, then 0x
 
 47 records of 2,424 bytes: name (64), fog flag at 64, fog colour at 68, fog start/end at 84, light colour at 140, then 8 texture swaps (`from` at 164 + 64·i, `to` at 676 + 64·i). The swaps replace the sky-dome placeholder `do_domereplace` with a real sky such as `do_T_512`.
 
+### Track weather and cameras
+
+`<track>_weather_<category>.bin` (1,344 bytes, XOR) says what a menu weather category means on a track: texture swaps (dry lightmaps to wet or sunset ones, sky domes) and the `weather.bin` presets it picks from, with weights. `<track>_cams.bin` (220-byte XOR records) holds the original's cameras: the player views (`follow`, `follow2`, `follow3`, `Bumper`, `tower`), TV sets whose cameras take over by distance along the racing line, and `podium`. Both layouts are in `FORMATS.md`.
+
 ### Other files
 
 | File | Contents | Used |
 | --- | --- | --- |
 | `hud.ini` | Speedometer range per class (37–81 km/h) | Yes, as top speed |
-| `Music.ini` | Music per game state | Informs the music choice |
+| `Music.ini` | Music per game state and on-track genres | Menu, finish, podium themes; surf/rock/dance songs |
+| `Languages/English.bin` | Menu and message strings | Race lengths, ghost modes, team names, championships, messages |
+| `Maps_high/hud_*.fsp`, `Font_54321.fsp` | Original HUD graphics | Yes (decoded in JavaScript) |
 | `Maps_cars/*.tga` | Car skins, uncompressed 32-bit TGA | Yes |
 | `Cars/mats_<class>_NN.fsm` | Skin variants (unaligned mattable + materials) | Body texture name only |
 | `Cars/class_*.bin` | Per-class sound, HUD and effect asset names | No |
@@ -176,6 +182,10 @@ The renderer is a single WebGL2 (GLES 3.0) shader pair that reproduces the origi
 
 Draw order per frame: track opaque, cars opaque (body plus four wheel matrices), track blended, car shadows blended. Fog is linear between the weather's start and end distances, mixed at most 85%.
 
+### Weather and effects
+
+A race's weather is a `weather.bin` preset plus the track's category file: the preset sets sky, fog and light, the category swaps textures (dry lightmaps for wet or sunset ones; overrides now apply to lightmaps too). `src/effects.*` simulates rain (streaks in a box that follows the camera), tire smoke from sliding wheels (the per-class `FX_tiresmoke_*`), spray behind the tires on wet tracks (`FX_spray_rain`/`_wet`) and fading skid-mark ribbons, and draws them as CPU-built quads through a separate sprite shader (alpha-blended, fogged, no depth writes; marks with polygon offset).
+
 ### Coordinate conventions
 
 - World space is used as-is: right-handed, Z up, CCW front faces — GL defaults, so no axis swap or winding flip.
@@ -207,11 +217,15 @@ The original `bamms.dll` multibody solver is replaced by a fixed-step (240 Hz) r
 | Braking and reverse | Brake while slower than 0.6 m/s engages reverse (top 5 m/s) | 9 m/s² brake |
 | Friction circle | Combined lateral + longitudinal force clamped to μN | — |
 | Steering | Up to 0.5 rad, reduced with speed to 45% at high speed | — |
-| Chassis contacts | The model's `m_coll_sphere_NN` spheres against the world; impulse with inertia | Restitution 0.25, friction 0.3 |
+| Chassis contacts | The model's `m_coll_sphere_NN` spheres against the world, plus four 2.5 cm skid spheres flush with the body's underside at its corners; impulse with inertia | Restitution 0.25, friction 0.3 |
+| Wheel rays | Start 10 cm above the suspension mount, so a mount pushed into a bank still finds the surface (bump stop pushes it out) | Drawn wheels follow the ground up to half a radius past the bump stop |
+| Wet grip | Wet or rainy track | μ × 0.9 (wet), × 0.85 (rain) |
 | Car to car | Two spheres per car along its axis, equal-and-opposite impulses | Restitution 0.3 |
 | Grid hold | `hold` flag locks the wheels during the countdown | — |
 
-The car reports `rpm`, `skid` and `impact` each step for the audio layer.
+The car reports `rpm`, `skid` and `impact` each step for the audio layer, and a per-wheel `slide` (sideways slip, or locked under braking/handbrake) for tire smoke and skid marks.
+
+The model's own collision spheres sit about 7 cm above the drawn underside, which rests only 1–2 cm off the ground; before the skid spheres the nose and tail sank into the ground over crests and at the foot of banks. `CHAOS=seed` in the harness drives erratically and reports how many frames any car's drawn body or wheels were inside the ground.
 
 ### AI driver
 
@@ -225,11 +239,23 @@ The car reports `rpm`, `skid` and `impact` each step for the audio layer.
 
 ### Race flow
 
-- **States:** Countdown (4 s, cars held; online it is held until every player has loaded) → Racing → Finished (every local player done; the rest keep driving and finished players switch to autopilot).
-- **Roles:** each car on the grid is a local player (0 or 1), an AI car simulated here, or a remote car. `Game::start` takes them as a string, one character per car (`"01aaa"` = split-screen with three AI cars; `"r0ra"` = online, the second car is ours and the fourth is an AI car we host).
-- **Laps:** each racer must cross its next checkpoint gate in order (2D segment intersection between frames); crossing gate 01 starts a lap, and passing it after the last lap finishes the race.
-- **Standings:** finishers by finish time, then laps × 1000 + checkpoints × 10 − distance to the next gate.
+- **States:** Countdown (4 s, cars held; online it is held until every player has loaded) → Racing → Finished (every local player done; the rest keep driving and finished players switch to autopilot) → Podium (prize ceremony: no physics, one view).
+- **Config:** `Game::start(RaceConfig)`: track, weather preset and category, laps or seconds, practice, ghost, and per car a class, skin, top speed, role and optional AI pace. The page passes it as one string (`parseRaceConfig`: `track=mach;laps=3;cars=pro_std,skin,58,0|junior_std,skin,37,a|...`). Roles: `0`/`1` local player, `a` AI simulated here, `r` remote.
+- **Laps:** each racer must cross its next checkpoint gate in order (2D segment intersection between frames); crossing gate 01 starts a lap, and passing it after the last lap finishes the race. Timed races: once time is up, each car finishes at its next line crossing. Practice never finishes.
+- **Checkpoint warnings:** a local player crossing a gate other than the next one (or the one just passed) gets `missedcp` (it was ahead: they cut the track) or `wrongcp` (out of order), at most every 2.5 s.
+- **Standings:** finishers by laps, then finish time; then laps × 1000 + checkpoints × 10 − distance to the next gate.
 - **Resets:** upside down for 1.5 s (player) or 1 s (AI), or falling below the track → respawn on the racing line; the player can press R.
+
+### Game modes
+
+- **Quick race:** Cup (opponents of your class) or Open (opponents from every class but the Monster truck); laps (1–10) or time (1, 2, 3, 5, 10, 20 minutes, the original's options).
+- **Practice:** alone on the track; a translucent ghost replays your best or last lap (snapshots every 50 ms of lap time, kept per track and class while the page is open).
+- **Championship:** the original's ten class cups and the open BSR championship (`game.js`, `Champ`). A season is six races, one per track, against seven named AI drivers with a fixed pace; 10-8-6-5-4-3-2-1 points plus one for the win; the grid in reverse championship order. A top-three finish wins a cup and unlocks the next championship. Saved in `localStorage`.
+- **Podium:** after a race the top three stand on the track's podium (`podiumpos01–03`, the rest in front) behind their cups (`prizes_track.fso` at `prizepos01–03`), filmed by a sweeping camera, with the podium or "nopodium" theme.
+
+### Cameras
+
+The modes are the original's views from `<track>_cams.bin`: Follow (default; 2.8 m back, 1.1 m up), Follow 2, Follow 3, Bumper, Tower (the fixed driver stand, zooming to keep about 3 m of track around the car in view) and TV (the set-1 trackside cameras, each covering a stretch of the racing line). Fields of view are horizontal, as in the original, so wide screens keep its framing.
 
 ### Split-screen
 
@@ -243,13 +269,14 @@ Each browser simulates only its own car; the host also simulates the AI cars. Th
 2. **Start.** The host sends the grid (players in join order at the back, AI cars in front) and a race id. Every client loads the track, calls `bsr_start` with its own role string and holds the countdown (`bsr_set_waiting`) until the host sends `go`, once everyone reports ready or after 45 s.
 3. **Racing.** Every 50 ms each client sends the cars it simulates as one binary packet: `float32 [raceId, count, (racer, 31 floats)…]` with position, orientation quaternion, velocities, wheel steer/compression/spin and lap progress. Receivers keep a buffer per car and draw it 100 ms in the past, interpolated between snapshots (`SnapshotBuffer`). Lap and finish state come from the owner, who sees every checkpoint crossing.
 4. **Contact.** Car-to-car collisions run on both machines, but each side only moves its own car (`collideCars(a, b, moveA, moveB)`), so two players bumping each other both feel it without fighting over the other car.
-5. **Leaving.** A player who leaves or disconnects is removed from everyone's race; if the host leaves, the AI cars go too and the longest-standing player becomes host. Online races can't be paused.
+5. **Status.** The relay answers `{"t":"ping"}` itself. Every 2 s each client measures its round trip and tells the room `{"t":"stat", ping, state}`. Tab shows the room (place, class, team, progress, ping, plus members not in this race); other players' cars carry name tags with a connection dot and the estimated latency (half of both round trips), or "lag" when no state arrived for 1 s (`bsr_screen` projects the cars).
+6. **Leaving.** A player who leaves or disconnects is removed from everyone's race; if the host leaves, the AI cars go too and the longest-standing player becomes host. Online races can't be paused.
 
 The relay forwards states between players, so latency is two hops through the server. The interpolation delay hides jitter and short losses (tested natively: at 9.4 m/s with 15 ms jitter and 5 % loss, remote cars stay within 3 cm of the true delayed path).
 
 ## Web front-end
 
-`web/game.js` owns everything outside the 3D view — menu, data loading, HUD, audio and touch input — and talks to the engine through exported C functions and three callbacks.
+`web/game.js` owns everything outside the 3D view — menu, data loading, HUD, audio, championship, online lobby and touch input — and talks to the engine through exported C functions and four callbacks.
 
 ### Startup and loading
 
@@ -263,21 +290,26 @@ The relay forwards states between players, so latency is two hops through the se
 | Export | Arguments | Purpose |
 | --- | --- | --- |
 | `bsr_init` | — | Create the context and start the main loop; returns 0 without WebGL2 |
-| `bsr_start` | track, class, skins (CSV, one per car), opponents, laps, top speed (km/h), weather preset, roles | Load and begin a race; returns the number of cars, 0 on failure |
+| `bsr_start` | race config string (see Race flow) | Load and begin a race; returns the number of cars, 0 on failure |
+| `bsr_podium` | — | Start the prize ceremony |
+| `bsr_preview` | class, skin, w, h | Render a car on a transparent background (menu); returns a pointer to RGBA pixels |
+| `bsr_speakers` | — | Trackside speaker positions (JSON), for localized music |
+| `bsr_screen` | remote only | Cars on screen in player 0's view (JSON), for name tags |
 | `bsr_touch` | steer, throttle, brake | Analog input from the touch controls (player 1) |
 | `bsr_set_paused` | 0/1 | Pause or resume |
 | `bsr_camera`, `bsr_reset_car` | player | Camera cycle, respawn |
 | `bsr_autopilot`, `bsr_stop` | 0/1 / — | AI-driven players, end race |
-| `bsr_results` | — | Standings JSON: car index, local player, remote/left, place, finished, time, best lap |
+| `bsr_results` | — | Standings JSON: car index, local player, remote/left, place, finished, time, best lap, laps, class |
 | `bsr_set_online`, `bsr_set_waiting` | 0/1 | Disable pausing; hold the countdown |
 | `bsr_snapshot_floats`, `bsr_get_state`, `bsr_put_state` | car, float buffer | Read the state of a car simulated here; feed a snapshot of a remote car |
 | `bsr_remove_racer` | car | A remote player left: hide the car, rank it last unless finished |
 
 | Callback (on `Module`) | Rate | Payload |
 | --- | --- | --- |
-| `onHud(json, player)` | 20 Hz per local player | Speed, lap/laps, place/racers, race and lap times, countdown, state, waiting |
+| `onHud(json, player)` | 20 Hz per local player | Speed, lap/laps, place/racers, race and lap times, time left, countdown, state, camera, rpm, top speed |
 | `onAudio(rpm, throttle, skid, impact, speed, player)` | Every frame | Drives the sound loops |
-| `onEvent(name)` | On change | `beep`, `go`, `lap:<player>`, `lastlap:<player>`, `finish:<player>`, `paused`, `resumed` |
+| `onListener(x, y, z, fx, fy, fz)` | Every frame | Player 0's camera, for positional (localized) music |
+| `onEvent(name)` | On change | `beep`, `go`, `lap:<p>`, `lastlap:<p>`, `laptime:<p>:<s>`, `finish:<p>`, `missedcp:<p>`, `wrongcp:<p>`, `timeleft:<min>`, `timeup`, `deadcar:<p or -1>`, `paused`, `resumed` |
 
 ### Audio
 
@@ -289,7 +321,11 @@ Audio is decoded in JavaScript, not WASM. `.fsw` files are parsed as RIFF, the `
 | Tire slip loop | Gain follows `skid` above 1.5 m/s |
 | Impacts | One-shot above 1.2 m/s impulse, 180 ms cooldown, two intensities |
 | Crowd loop | Constant, low |
-| Announcer, horn, menu clicks | On events (start, go, finish, 1st place or race over) |
+| Rain, thunder | Rain loop on rain presets; thunder presets (`_T`) add thunder at random intervals with a lightning flash |
+| Announcer | One of three voices per race: start, minutes left, time up, new lap record, winner, race over, car stuck/on its roof |
+| Warning | `FX_WARNING` on a missed or wrong checkpoint |
+| Music | Menu theme in the menu and lobby, finish theme on results, podium/nopodium themes; on track a random song from the enabled genres, either stereo (MP3) or localized: the mono WAV played through HRTF panners at the track's loudspeakers |
+| Horn, menu clicks | On events |
 
 ### Input and frame loop
 
@@ -340,12 +376,13 @@ The port has not yet been played in a real browser by a person, so driving feel 
 
 | Area | Limitation | Possible next step |
 | --- | --- | --- |
-| Verification | No WebGL in headless Firefox on the build machine; browser rendering is inferred from the native harness and the Node test | Play-test in Chrome/Firefox/Safari; add a headless Chromium (SwiftShader) screenshot test |
+| Verification | Checked in headless Firefox (`tools/browsershot.js`, WebGL works), the native harness and the Node test; not yet played by a person | Play-test in Chrome/Firefox/Safari |
 | Handling | Physics constants are hand-tuned against lap completion, not against the original game | Tune from play-testing; or decode `bamms_*.bin` and the `bamms.dll` API (10 exports) |
-| Weather | Wet/rain presets change sky, fog and tint only | Rain particles and sounds, `g_reflection` geometry for wet tracks, `XT_shadow*wet` lightmaps |
-| Track cameras | `<track>_cams.bin` (TV cameras) is not decoded | Reverse the camera loader for a replay/TV view |
-| Game modes | Single race only: no career, prizes, podium or pit stops | Podium and prize positions already exist in `_meta.fso` |
-| Effects | No tire smoke, engine smoke or spray (asset names are in `class_*.bin`) | Billboard particles using the existing textures |
+| Weather | No mirrored `g_reflection` geometry on wet tracks; car shadow/spray map names in the track weather files are unused | Draw the reflection subtrees when wet |
+| Cameras | The tower/TV zoom and the chase smoothing are guesses; TV sets 2 and 3 and `towerpractice` are unused | Compare with the original; a replay mode could cut between the TV sets |
+| Game modes | No pit stops, replays or two-race weekends; the championship points and AI names are this port's | Decode the scoring from the executable |
+| Effects | No engine smoke | Billboard particles using `FX_EngineSmoke_*` |
+| Tracks | Only the six tracks on the disc | The original could install bonus tracks; the packer would need to pick them up |
 | LOD | Only LOD 0 is drawn | Use the geoset LOD distances on low-end devices |
 | Low-detail data | `Maps_low` and `_mid`/`_low` track files are unused | Offer a low-detail option for phones (smaller downloads) |
 | Memory | GPU resources of a previous track are not freed on track change | Release VAOs, buffers and textures in `Game::start` |
