@@ -60,6 +60,10 @@ public:
     float raceTime() const { return raceTime_; }
     const std::vector<Racer>& racers() const { return racers_; }
     const TrackMeta& meta() const { return meta_; }
+    const CollisionWorld& world() const { return world_; }
+    // Diagnostics: lowest height of the drawn body's bottom corners (body) and wheel bottoms (wheel) above the
+    // ground right under them; negative = drawn inside the ground.
+    void clearance(int racer, float& body, float& wheel) const;
 
 private:
     struct CarModel {
@@ -67,6 +71,7 @@ private:
         std::vector<Part*> parts;
         Part* wheel[4] = {};
         V3 wheelCentre[4];
+        V3 bodyLo, bodyHi;  // model-space bounds of the solid body parts (no wheels, shadow or helpers)
     };
     void buildCarModel(CarModel& cm, const FSO& fso, const std::map<std::string, std::string>& ov);
     struct View {

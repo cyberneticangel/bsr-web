@@ -162,7 +162,7 @@ function fail(msg) { console.error('FAIL:', msg); process.exit(1); }
   if (drawCalls < 100) fail('too few draw calls');
   if (!events.includes('go')) fail('race never started');
   if (!(last.speed > 5)) fail('player car not moving');
-  if (seconds > 40 && !events.includes('finish')) fail('race not finished');
+  if (seconds > 40 && !events.some((e) => e.startsWith('finish'))) fail('race not finished');
   console.log('PASS');
   process.exit(0);
 })().catch((e) => fail(e.stack || e));

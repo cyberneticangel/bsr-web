@@ -27,6 +27,18 @@ void Game::buildCarModel(CarModel& cm, const FSO& fso, const std::map<std::strin
         if (isWheel || n.find("coll_sphere") != std::string::npos) continue;
         cm.parts.push_back(&p);
     }
+    cm.bodyLo = V3(1e9f, 1e9f, 1e9f);
+    cm.bodyHi = V3(-1e9f, -1e9f, -1e9f);
+    for (const Part* p : cm.parts) {
+        bool solid = false;
+        for (const Batch& b : p->batches) solid |= !b.blend;
+        if (!solid) continue;  // the shadow quad lies on the ground on purpose
+        for (int k = 0; k < 8; k++) {
+            V3 c = p->local.point(V3((k & 1) ? p->bmax.x : p->bmin.x, (k & 2) ? p->bmax.y : p->bmin.y, (k & 4) ? p->bmax.z : p->bmin.z));
+            cm.bodyLo = V3(std::min(cm.bodyLo.x, c.x), std::min(cm.bodyLo.y, c.y), std::min(cm.bodyLo.z, c.z));
+            cm.bodyHi = V3(std::max(cm.bodyHi.x, c.x), std::max(cm.bodyHi.y, c.y), std::max(cm.bodyHi.z, c.z));
+        }
+    }
 }
 
 bool Game::start(const std::string& track, const std::string& carClass, const std::vector<std::string>& skinsIn,
@@ -98,6 +110,17 @@ bool Game::start(const std::string& track, const std::string& carClass, const st
         for (auto& p : cm->model.parts)
             if (lower(p.name).find("coll_sphere") != std::string::npos)
                 sph.push_back({(p.bmin + p.bmax) * 0.5f, (p.bmax.x - p.bmin.x) * 0.5f});
+        // The model's collision spheres sit high (their bottoms ~7 cm above the drawn underside), so on crests,
+        // kerbs and the foot of banks the nose and tail sank into the ground. Skid spheres flush with the
+        // underside at the four corners keep the drawn body out of it.
+        if (cm->bodyLo.x < cm->bodyHi.x) {
+            const float sr = 0.025f;
+            for (int k = 0; k < 4; k++) {
+                V3 c((k & 1) ? cm->bodyHi.x - sr : cm->bodyLo.x + sr, (k & 2) ? cm->bodyHi.y - sr : cm->bodyLo.y + sr,
+                     cm->bodyLo.z + sr);
+                sph.push_back({c, sr});
+            }
+        }
         char role = roles[i];
         r.player = role >= '0' && role < '0' + kMaxLocal ? role - '0' : -1;
         r.remote = role == 'r';
@@ -165,6 +188,7 @@ void Game::placeOnLine(Racer& r) {
     r.car.place(line.pts[i], std::atan2(d.y, d.x), world_);
     r.flipTime = 0;
     r.pathIdx = i;
+    r.resets++;
 }
 
 void Game::resetPlayer(int p) {
@@ -412,6 +436,29 @@ std::string Game::resultsJson() const {
         out += b;
     }
     return out + "]";
+}
+
+void Game::clearance(int racer, float& body, float& wheel) const {
+    body = wheel = 1e9f;
+    const Racer& r = racers_[racer];
+    const CarModel& cm = *carModels_[racer];
+    auto below = [&](const V3& p) {
+        Hit h;
+        if (!world_.raycast(p + V3(0, 0, 0.3f), V3(0, 0, -1), 0.6f, h) || h.n.z < 0.5f) return 1e9f;
+        return h.t - 0.3f;  // >0: p above ground
+    };
+    const V3& lo = cm.bodyLo;
+    const V3& hi = cm.bodyHi;
+    M4 bm = r.car.bodyMatrix();
+    for (int i = 0; i < 4; i++) {
+        V3 c((i & 1) ? hi.x : lo.x, (i & 2) ? hi.y : lo.y, lo.z);
+        body = std::min(body, below(bm.point(c)));
+    }
+    for (int w = 0; w < 4 && w < (int)r.car.wheels.size(); w++) {
+        if (!cm.wheel[w]) continue;
+        V3 hub = bm.point(cm.wheelCentre[w] + V3(0, 0, r.car.wheels[w].comp));
+        wheel = std::min(wheel, below(hub - r.car.R.col(2) * r.car.wheels[w].radius));
+    }
 }
 
 bool Game::packState(int racer, double now, float* out) const {

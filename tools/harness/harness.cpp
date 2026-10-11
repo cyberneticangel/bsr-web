@@ -3,6 +3,9 @@
 //
 // usage: harness <data dir> <track> <class> <out dir> <race seconds> [shot times...]
 //        options via env: CAM=0|1|2, OPP=n, LAPS=n, TOP=kmh, SKINS=a,b,c
+//        CHAOS=seed     the player drives erratically (crashes, flips) instead of on autopilot
+//        SHOTCLIP=m     screenshot whenever the player's drawn body is more than m metres inside the ground
+//        Prints bodyClip/wheelClip: frames in which any car's drawn body/wheels were inside the ground.
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
@@ -127,8 +130,49 @@ int main(int argc, char** argv) {
     int shotIdx = 0;
     Input in;
     if (getenv("MANUAL")) in.throttle = 1;
+    // CHAOS=seed: the player drives erratically (random steering, handbrake, braking) to provoke crashes and flips.
+    unsigned chaos = getenv("CHAOS") ? (unsigned)atoi(getenv("CHAOS")) : 0;
+    if (chaos) game.autopilot = false;
+    float nextChange = 0;
+    int bodyClipFrames = 0, wheelClipFrames = 0;
+    float minBody = 1e9f, minWheel = 1e9f, lastClipShot = -10;
+    auto shoot = [&](const char* prefix) {
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        game.render(W, H);
+        std::vector<uint8_t> px((size_t)W * H * 4);
+        glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+        char name[96];
+        snprintf(name, sizeof name, "%s%s_%02d.png", prefix, track.c_str(), shotIdx++);
+        writePNG(out + "/" + name, W, H, px);
+        return std::string(name);
+    };
+    auto rnd = [&]() { chaos = chaos * 1103515245u + 12345u; return (float)((chaos >> 8) & 0xffff) / 65535.0f; };
     for (float t = 0; t < seconds; t += dt) {
+        if (chaos && t >= nextChange) {
+            nextChange = t + 0.3f + rnd() * 1.2f;
+            in.throttle = rnd() < 0.8f ? 1.0f : 0.0f;
+            in.brake = in.throttle == 0 ? 1.0f : 0.0f;
+            in.steer = rnd() * 2 - 1;
+            in.handbrake = rnd() < 0.15f;
+        }
         game.update(dt, in);
+        for (size_t i = 0; i < game.racers().size(); i++) {
+            float b, w;
+            game.clearance((int)i, b, w);
+            minBody = std::fmin(minBody, b);
+            minWheel = std::fmin(minWheel, w);
+            if (b < -0.01f) bodyClipFrames++;
+            if (w < -0.015f) wheelClipFrames++;
+        }
+        if (getenv("SHOTCLIP") && t > lastClipShot + 2.0f) {  // screenshot when the player's body is in the ground
+            float b, w;
+            game.clearance(0, b, w);
+            if (b < -(float)atof(getenv("SHOTCLIP"))) {
+                lastClipShot = t;
+                std::string name = shoot("clip_");
+                fprintf(stderr, "  clip shot %s t=%.1f body=%.3f wheel=%.3f\n", name.c_str(), t, b, w);
+            }
+        }
         maxSpeed = std::fmax(maxSpeed, std::fabs(game.racers()[0].car.speed()));
         if (getenv("TRACE") && fmodf(t, 0.5f) < dt) {
             int ti = getenv("TRACE_CAR") ? atoi(getenv("TRACE_CAR")) : 0;
@@ -141,27 +185,22 @@ int main(int argc, char** argv) {
                     c.R.col(2).z, contacts, c.wheels[0].comp, c.wheels[1].comp, c.wheels[2].comp, c.wheels[3].comp);
         }
         if (nextShot < shots.size() && t >= shots[nextShot]) {
-            glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-            game.render(W, H);
-            std::vector<uint8_t> px((size_t)W * H * 4);
-            glReadPixels(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-            char name[64];
-            snprintf(name, sizeof name, "/%s_%02d.png", track.c_str(), shotIdx++);
-            writePNG(out + name, W, H, px);
-            fprintf(stderr, "  shot %s at %.1fs  hud=%s\n", name + 1, t, game.hudJson().c_str());
+            std::string name = shoot("");
+            fprintf(stderr, "  shot %s at %.1fs  hud=%s\n", name.c_str(), t, game.hudJson().c_str());
             nextShot++;
         }
         bool allDone = true;
         for (auto& r : game.racers()) allDone &= r.finished;
         if (allDone) break;
     }
-    printf("track=%s class=%s t=%.1fs maxSpeed=%.1f km/h events=%d\n", track.c_str(), cls.c_str(), game.raceTime(),
-           maxSpeed * 3.6f, gEvents);
+    printf("track=%s class=%s t=%.1fs maxSpeed=%.1f km/h events=%d bodyClip=%d wheelClip=%d minBody=%.3f minWheel=%.3f\n",
+           track.c_str(), cls.c_str(), game.raceTime(), maxSpeed * 3.6f, gEvents, bodyClipFrames,
+           wheelClipFrames, minBody, minWheel);
     for (size_t i = 0; i < game.racers().size(); i++) {
         const Racer& r = game.racers()[i];
-        printf("  car%zu place=%d lap=%d nextCp=%d finished=%d time=%.2f best=%.2f pos=(%.1f,%.1f,%.2f) up=%.2f\n", i,
-               r.place, r.lap, r.nextCp, r.finished, r.finishTime, r.bestLap, r.car.pos.x, r.car.pos.y, r.car.pos.z,
-               r.car.R.col(2).z);
+        printf("  car%zu place=%d lap=%d nextCp=%d finished=%d time=%.2f best=%.2f pos=(%.1f,%.1f,%.2f) up=%.2f resets=%d\n",
+               i, r.place, r.lap, r.nextCp, r.finished, r.finishTime, r.bestLap, r.car.pos.x, r.car.pos.y, r.car.pos.z,
+               r.car.R.col(2).z, r.resets);
     }
     return 0;
 }

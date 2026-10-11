@@ -47,6 +47,7 @@ struct Racer {
     float stuckTime = 0, reverseTime = 0, flipTime = 0, stuckClock = 0;
     int stuckCount = 0;
     bool needsReset = false;
+    int resets = 0;         // respawns on the racing line (diagnostics)
     int skin = 0;
     V3 prevPos;
     int place = 0;

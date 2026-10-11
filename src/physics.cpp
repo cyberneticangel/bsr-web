@@ -140,6 +140,7 @@ float CollisionWorld::groundHeight(float x, float y, float fromZ) const {
 static const float kTravel = 0.03f;   // suspension travel each way
 static const float kSpringHz = 3.2f;
 static const float kDampRatio = 0.55f;
+static const float kRayLift = 0.1f;   // wheel rays start this far above the suspension mount
 
 void Car::setup(const std::vector<V3>& wc, float wheelRadius, const std::vector<CollSphere>& sph, const CarSpec& s) {
     spec = s;
@@ -223,7 +224,12 @@ void Car::step(float dt, const CollisionWorld& world) {
         float rayLen = kTravel + preload + w.radius + kTravel;
         Hit h;
         float prevComp = w.comp;
-        w.contact = world.raycast(mount, -up, rayLen + 0.02f, h) && h.t <= rayLen && dot(h.n, up) > 0.3f;
+        // The ray starts well above the mount: a mount pushed into a bank or kerb would otherwise start below the
+        // surface, miss it, and let that corner of the car sink into the ground. h.t < 0 then means the surface
+        // is above the mount, which the bump stop below pushes out.
+        w.contact = world.raycast(mount + up * kRayLift, -up, kRayLift + rayLen + 0.02f, h) && dot(h.n, up) > 0.3f;
+        h.t -= kRayLift;
+        w.contact = w.contact && h.t <= rayLen;
         if (!w.contact) {
             w.comp = std::max(w.comp - dt * 0.5f, -kTravel);
             w.slip = 0;
@@ -235,11 +241,13 @@ void Car::step(float dt, const CollisionWorld& world) {
         // comp: hub displacement from rest (positive = compressed).
         float hubDist = h.t - w.radius;          // mount -> hub
         float x = (kTravel - hubDist) + preload;  // spring compression incl. preload
-        w.comp = clampf(kTravel - hubDist, -kTravel, kTravel);
+        // Past the bump stop the drawn wheel keeps following the ground (into the wheel arch) instead of being
+        // drawn inside it; the spring force uses x, not comp.
+        w.comp = clampf(kTravel - hubDist, -kTravel, kTravel + w.radius * 0.5f);
         float cv = (w.comp - prevComp) / dt;
         float fs = k * x + cdamp * cv;
         if (kTravel - hubDist > kTravel) fs += (kTravel - hubDist - kTravel) * k * 8;  // bump stop
-        fs = std::max(fs, 0.0f);
+        fs = clampf(fs, 0.0f, quarter * kGravity * 40);
         V3 cp = mount - up * h.t;  // contact point
         V3 r = cp - pos;
         V3 n = h.n;
