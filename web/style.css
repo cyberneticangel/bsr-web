@@ -25,6 +25,15 @@ h2 { margin: 0 0 16px; color: var(--accent); text-align: center; letter-spacing:
 .choices button.sel { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .skins button { width: 34px; padding: 6px 0; }
 select, input[type=range] { flex: 1; min-width: 140px; }
+input[type=text] { flex: 1; min-width: 90px; background: #1c2028; color: var(--fg); border: 1px solid #3a404a;
+  border-radius: 6px; padding: 7px 8px; font: inherit; font-size: 14px; }
+#net-code { flex: 0 0 82px; min-width: 0; text-transform: uppercase; letter-spacing: 2px; }
+.room-code { font-size: 22px; letter-spacing: 4px; color: var(--accent); }
+#net-players { list-style: none; margin: 0 0 6px 102px; padding: 0; font-size: 14px; }
+#net-players li { padding: 3px 0; }
+#net-players .tag { color: var(--muted); font-size: 12px; margin-left: 6px; }
+button:disabled, select:disabled, input:disabled { opacity: .45; cursor: default; }
+button:disabled:hover { border-color: #3a404a; }
 select { background: #1c2028; color: var(--fg); border: 1px solid #3a404a; border-radius: 6px; padding: 6px; font-size: 14px; }
 input[type=range] { accent-color: var(--accent); }
 button { background: #1c2028; color: var(--fg); border: 1px solid #3a404a; border-radius: 6px; padding: 8px 14px;
@@ -38,6 +47,17 @@ button.big { display: block; width: 100%; margin: 18px 0 8px; padding: 12px; fon
 #status .bar div { height: 100%; background: var(--accent); width: 0; transition: width .1s; }
 
 #hud { position: fixed; inset: 0; pointer-events: none; font-weight: bold; text-shadow: 0 2px 3px rgba(0,0,0,.8); }
+.hud-view { position: absolute; inset: 0; }
+#hud-p2 { display: none; }
+/* Split screen: player 1 on top, player 2 below, smaller type. */
+#hud.split #hud-p1 { bottom: 50%; }
+#hud.split #hud-p2 { display: block; top: 50%; border-top: 3px solid var(--accent); }
+#hud.split .hud-tl .pos { font-size: 38px; }
+#hud.split .hud-tl .pos small, #hud.split .hud-tr div:first-child { font-size: 18px; }
+#hud.split .hud-tl .lap, #hud.split .hud-tr { font-size: 15px; }
+#hud.split .hud-br { font-size: 38px; bottom: 10px; }
+#hud.split .countdown { font-size: 72px; top: 24%; }
+#hud.split .msg { font-size: 28px; top: 16%; }
 .hud-tl { position: absolute; left: 16px; top: 12px; }
 .hud-tl .pos { font-size: 54px; font-style: italic; color: var(--accent); line-height: 1; }
 .hud-tl .pos small { font-size: 24px; color: var(--fg); }
@@ -62,6 +82,7 @@ button.big { display: block; width: 100%; margin: 18px 0 8px; padding: 12px; fon
   border: 2px solid rgba(255,255,255,.35); font-weight: bold; touch-action: none; }
 .t-btns #t-gas { background: rgba(255,204,26,.35); }
 @media (max-width: 600px) {
+  #net-players { margin-left: 0; }
   .hud-tl .pos { font-size: 40px; }
   .hud-br { font-size: 40px; bottom: 140px; }
   .hud-keys { display: none; }

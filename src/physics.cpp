@@ -347,7 +347,7 @@ M4 Car::wheelMatrix(int i, const V3& c) const {
     return bodyMatrix() * M4::translate(c + V3(0, 0, w.comp)) * M4::rotZ(w.steer) * M4::rotX(-w.spin) * M4::translate(-c);
 }
 
-void collideCars(Car& a, Car& b) {
+void collideCars(Car& a, Car& b, bool moveA, bool moveB) {
     V3 d = b.pos - a.pos;
     float rr = (a.boundRadius + b.boundRadius) * 0.6f;
     if (dot(d, d) > rr * rr * 4) return;
@@ -362,13 +362,13 @@ void collideCars(Car& a, Car& b) {
             if (dist >= r || dist < 1e-5f) continue;
             V3 n = dd * (1.0f / dist);
             float pen = r - dist;
-            a.pos -= n * (pen * 0.5f);
-            b.pos += n * (pen * 0.5f);
+            if (moveA) a.pos -= n * (pen * 0.5f);
+            if (moveB) b.pos += n * (pen * 0.5f);
             float vn = dot(b.vel - a.vel, n);
             if (vn < 0) {
                 float j = -(1.3f) * vn / (1 / a.spec.mass + 1 / b.spec.mass);
-                a.vel -= n * (j / a.spec.mass);
-                b.vel += n * (j / b.spec.mass);
+                if (moveA) a.vel -= n * (j / a.spec.mass);
+                if (moveB) b.vel += n * (j / b.spec.mass);
                 a.impact = std::max(a.impact, j / a.spec.mass);
                 b.impact = std::max(b.impact, j / b.spec.mass);
             }
