@@ -211,6 +211,7 @@ EMSCRIPTEN_KEEPALIVE void bsr_camera(int player) { game.cycleCamera(player); }
 EMSCRIPTEN_KEEPALIVE void bsr_reset_car(int player) { game.resetPlayer(player); }
 EMSCRIPTEN_KEEPALIVE void bsr_autopilot(int on) { game.autopilot = on != 0; }
 EMSCRIPTEN_KEEPALIVE void bsr_stop() { game.stop(); }
+EMSCRIPTEN_KEEPALIVE int bsr_podium() { return game.startPodium() ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE const char* bsr_results() {
     static std::string r;
     r = game.resultsJson();

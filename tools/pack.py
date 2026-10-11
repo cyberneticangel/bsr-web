@@ -170,6 +170,9 @@ def main(data, web):
             to = wx[o + 676 + i * 64:o + 740 + i * 64].split(b'\0')[0].decode('latin1')
             if to:
                 common.update(tex_files(to, ''))
+    # The cups for the podium ceremony.
+    common.add('prizes_track.fso')
+    common |= fso_textures('prizes_track.fso', '')
     for name in FX_TEXTURES:
         common.update(tex_files(name, ''))
     manifest['hud'] = {}

@@ -26,6 +26,8 @@ struct TrackMeta {
     std::vector<Gate> checkpoints;  // racing checkpoints, [0] is start/finish
     std::vector<Path> aiLines;
     Path left, right;
+    std::vector<GridSlot> podium;  // podiumpos01..08: 1-3 on the steps, then in front of it
+    std::vector<V3> prizes;        // prizepos01..03: where the cups stand
     bool load(const std::string& track);
 };
 
@@ -35,6 +37,7 @@ struct Racer {
     int player = -1;        // local human index (split-screen), -1 for AI and remote cars
     bool remote = false;    // simulated on another machine; state arrives as network snapshots
     bool gone = false;      // remote player left the race: not drawn, not collided
+    bool hidden = false;    // not drawn (off the podium)
     int aiLine = 0;
     float aiSkill = 1.0f;
     int pathIdx = 0;

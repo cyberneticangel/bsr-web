@@ -85,6 +85,10 @@ bool TrackMeta::load(const std::string& track) {
         V3 k0(v[0].x, v[0].y, v[0].z), k1(v[3].x, v[3].y, v[3].z);
         if (name.find("gridpos") != std::string::npos) {
             grid.push_back({k0, std::atan2(k1.y - k0.y, k1.x - k0.x)});
+        } else if (name.find("podiumpos") != std::string::npos) {  // the line spans the car: tail to nose
+            podium.push_back({(k0 + k1) * 0.5f, std::atan2(k1.y - k0.y, k1.x - k0.x)});
+        } else if (name.find("prizepos") != std::string::npos) {
+            prizes.push_back(k0);
         } else if (name.find("checkpoint") != std::string::npos) {
             if (name.back() == 'p') continue;  // pit-lane checkpoint
             checkpoints.push_back({k0, k1});

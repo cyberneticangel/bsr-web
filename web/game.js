@@ -585,9 +585,10 @@ function setMode(mode) {
 }
 
 function show(id) {
-  for (const p of ['menu', 'pause', 'results']) $(p).classList.toggle('hidden', p !== id);
+  for (const p of ['menu', 'pause', 'results', 'podium']) $(p).classList.toggle('hidden', p !== id);
   const racing = id === null;
   $('hud').classList.toggle('hidden', !racing && id !== 'pause');
+  if (id !== null && id !== 'pause') showBoard(false);
   const split = !!race && race.local > 1;
   $('hud').classList.toggle('split', split);
   $('touch').classList.toggle('hidden', !(racing && !split && ('ontouchstart' in window)));
@@ -715,6 +716,33 @@ function fmtTime(t) {
   return `${m}:${s.toFixed(2).padStart(5, '0')}`;
 }
 
+// Race over for the local players: the prize ceremony, then the results. Online, the ceremony waits for
+// nobody: if others are still racing, the live results come first.
+function afterRace() {
+  if (!race) return;
+  const res = JSON.parse(Module.ccall('bsr_results', 'string', [], []));
+  const everyone = res.every((r) => r.finished || r.gone);
+  if ((race.opts.online && !everyone) || race.opts.practice) return showResults();
+  showPodium(res);
+}
+
+function showPodium(res) {
+  if (!Module.ccall('bsr_podium', 'number', [], [])) return showResults();
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+  const top = res.filter((r) => !r.gone).slice(0, 3);
+  $('podium-names').innerHTML = top.map((r, k) =>
+    `<li class="p${k + 1}${r.player ? ' me' : ''}"><b>${k + 1}</b><span>${esc(race.names[r.i] || 'CPU')}</span></li>`).join('');
+  const onPodium = top.some((r) => r.player);
+  Audio.stopRace();
+  Audio.playMusic(onPodium ? manifest.music.podium : manifest.music.nopodium);
+  Audio.play('FX_env_crowd_applause_22', 0.7);
+  if (onPodium) Audio.play('FX_horn_finish_22_mo_A', 0.6);
+  show('podium');
+  const r = race;
+  clearTimeout(showPodium.timer);
+  showPodium.timer = setTimeout(() => { if (race === r && !$('podium').classList.contains('hidden')) showResults(); }, 14000);
+}
+
 function showResults() {
   if (!race) return;
   const res = JSON.parse(Module.ccall('bsr_results', 'string', [], []));
@@ -723,7 +751,7 @@ function showResults() {
   const timed = race.opts.minutes > 0;
   const rows = res.map((r) => {
     const name = race.names[r.i] ?? (r.player ? 'You' : 'CPU');
-    const time = r.finished ? fmtTime(r.time) : r.gone ? 'left' : 'running';
+    const time = r.finished ? fmtTime(r.time) : r.gone ? 'left' : race.opts.online ? 'running' : '—';
     return `<tr class="${r.player ? 'me' : ''}"><td>${r.place}</td><td>${esc(name)}</td>` +
       (open ? `<td>${esc(className(r.cls))}</td>` : '') +
       (timed ? `<td>${r.lap}</td>` : '') + `<td>${time}</td><td>${fmtTime(r.best)}</td></tr>`;
@@ -823,7 +851,7 @@ var Module = {
       if (race.finished.size < race.local) return;  // results once every local player is home
       const r = race;
       Announcer.say(first ? 'finish_number_1' : 'race_over', 0.9);
-      setTimeout(() => { if (race === r) showResults(); }, 3500);
+      setTimeout(() => { if (race === r) afterRace(); }, 3500);
     } else if (name === 'paused') show('pause');
     else if (name === 'resumed') show(null);
   },
@@ -1268,6 +1296,7 @@ const replay = () => {
 const online = () => !!(race && race.opts.online);
 $('resume').onclick = () => { Module.ccall('bsr_set_paused', null, ['number'], [0]); show(null); $('canvas').focus(); };
 $('restart').onclick = replay;
+$('podium-go').onclick = () => showResults();
 $('again').onclick = replay;
 $('quit').onclick = $('tomenu').onclick = () => {
   if (online()) Net.leaveRace();
@@ -1290,6 +1319,10 @@ $('net-invite').onclick = () => {
     () => setStatus('Invite link copied.'), () => setStatus(url));
 };
 window.addEventListener('keydown', (e) => {
+  if (!$('podium').classList.contains('hidden') && (e.code === 'Enter' || e.code === 'Space' || e.code === 'Escape')) {
+    e.preventDefault();
+    return showResults();
+  }
   if (e.code === 'Escape' && !inMenu() && $('results').classList.contains('hidden')) {
     const paused = !$('pause').classList.contains('hidden');
     if (!online()) Module.ccall('bsr_set_paused', null, ['number'], [paused ? 0 : 1]);
@@ -1298,7 +1331,7 @@ window.addEventListener('keydown', (e) => {
 });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && !online() && !inMenu() && $('pause').classList.contains('hidden') &&
-      $('results').classList.contains('hidden')) {
+      $('results').classList.contains('hidden') && $('podium').classList.contains('hidden')) {
     Module.ccall('bsr_set_paused', null, ['number'], [1]);
     show('pause');
   }

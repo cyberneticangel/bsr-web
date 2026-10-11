@@ -48,7 +48,7 @@ bool parseRaceConfig(const std::string& s, RaceConfig& out);
 
 class Game {
 public:
-    enum State { Idle, Countdown, Racing, Finished };
+    enum State { Idle, Countdown, Racing, Finished, Podium };
     static const int kMaxLocal = 2;
 
     bool init();
@@ -57,6 +57,9 @@ public:
     bool start(const std::string& track, const std::string& carClass, const std::vector<std::string>& skins,
                int opponents, int laps, float topSpeedKmh, const std::string& weather);
     void stop();
+    // Prize ceremony: the top three on the track's podium with their cups (top eight on the grid in front),
+    // seen from an orbiting camera. Racing stops; stop() or start() ends it.
+    bool startPodium();
     void update(float dt, const Input* in, int numInputs);  // in[p] drives local player p
     void update(float dt, const Input& in) { update(dt, &in, 1); }
     void render(int w, int h);  // one viewport per local player, stacked top to bottom
@@ -134,6 +137,7 @@ private:
     bool rain_ = false, wet_ = false, thunder_ = false;
     FSO trackFso_;
     Model track_;
+    Model prizes_;  // prizes_track.fso: gold, silver and bronze cups (parts "1", "2", "3")
     FST fst_;
     CollisionWorld world_;
     TrackMeta meta_;
@@ -157,6 +161,8 @@ private:
     float raceTime_ = 0, countdown_ = 0, accum_ = 0, camDt_ = 0;
     double now_ = 0;
     State state_ = Idle;
+    float podiumTime_ = 0;
+    void podiumCamera(int x, int y, int w, int h);
     int defaultCam_ = 0;
     int lastCountdownSec_ = -1;
 };

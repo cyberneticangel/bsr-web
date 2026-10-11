@@ -127,6 +127,7 @@ bool Game::start(const RaceConfig& cfgIn) {
             for (auto& [from, to] : tw.swaps) swaps[from] = to;
         weatherName_ = wxKey;
         gfx_.release(track_);
+        gfx_.release(prizes_);
         trackFso_ = FSO();
         meta_ = TrackMeta();
         trackName_.clear();
@@ -135,6 +136,8 @@ bool Game::start(const RaceConfig& cfgIn) {
         if (!meta_.load(t)) { fprintf(stderr, "track meta failed\n"); return false; }
         gfx_.buildModel(trackFso_, t, track_, swaps);
         world_.build(fst_);
+        FSO prizeFso;
+        if (loadFSO("prizes_track.fso", prizeFso)) gfx_.buildModel(prizeFso, "", prizes_);
         speakers_.clear();
         for (const Part& p : track_.parts) {
             std::string n = lower(p.name);
@@ -273,6 +276,7 @@ void Game::stop() {
     racers_.clear();
     for (auto& cm : carModels_) gfx_.release(cm->model);
     carModels_.clear();
+    podiumTime_ = 0;
     if (ghostModel_) gfx_.release(ghostModel_->model);
     ghostModel_.reset();
     ghostVisible_ = false;
@@ -416,6 +420,13 @@ void Game::updateRace(float dt) {
 
 void Game::update(float dt, const Input* in, int numInputs) {
     camDt_ += dt;
+    if (state_ == Podium) {
+        podiumTime_ += dt;
+        fx_.update(dt, {}, world_, camEye_);  // rain keeps falling, smoke clears
+        if (cb.audio)
+            for (int p = 0; p < (int)players_.size(); p++) cb.audio(p, 0, 0, 0, 0, 0);
+        return;
+    }
     if (racers_.empty() || paused) {
         if (cb.audio)
             for (int p = 0; p < (int)players_.size(); p++) cb.audio(p, 0, 0, 0, 0, 0);
@@ -548,7 +559,7 @@ void Game::draw() {
     for (auto& p : track_.parts) gfx_.drawPart(p, M4(), Pass::Opaque);
     for (size_t i = 0; i < racers_.size(); i++) {
         const Racer& r = racers_[i];
-        if (r.gone) continue;
+        if (r.gone || r.hidden) continue;
         CarModel& cm = *carModels_[i];
         M4 body = r.car.bodyMatrix();
         for (Part* p : cm.parts) gfx_.drawPart(*p, body, Pass::Opaque);
@@ -556,8 +567,20 @@ void Game::draw() {
             if (cm.wheel[w]) gfx_.drawPart(*cm.wheel[w], r.car.wheelMatrix(w, cm.wheelCentre[w]), Pass::Opaque);
     }
     for (auto& p : track_.parts) gfx_.drawPart(p, M4(), Pass::Blend);
+    if (state_ == Podium)
+        for (int k = 0; k < 3 && k < (int)meta_.prizes.size(); k++) {
+            const Part* cup = nullptr;
+            for (const Part& p : prizes_.parts)
+                if (p.name == std::to_string(k + 1)) cup = &p;
+            if (!cup) continue;
+            // Stand the cup's base on its prize position.
+            V3 base = cup->local.point(V3((cup->bmin.x + cup->bmax.x) * 0.5f, (cup->bmin.y + cup->bmax.y) * 0.5f, cup->bmin.z));
+            M4 at = M4::translate(meta_.prizes[k] - base);
+            gfx_.drawPart(*cup, at, Pass::Opaque);
+            gfx_.drawPart(*cup, at, Pass::Blend);
+        }
     for (size_t i = 0; i < racers_.size(); i++) {
-        if (racers_[i].gone) continue;
+        if (racers_[i].gone || racers_[i].hidden) continue;
         M4 body = racers_[i].car.bodyMatrix();
         for (Part* p : carModels_[i]->parts) gfx_.drawPart(*p, body, Pass::Blend);
     }
@@ -581,8 +604,59 @@ void Game::draw() {
     }
 }
 
+bool Game::startPodium() {
+    if (racers_.empty() || meta_.podium.size() < 3 || state_ == Idle) return false;
+    std::vector<Racer*> order;
+    for (Racer& r : racers_) order.push_back(&r);
+    std::sort(order.begin(), order.end(), [](const Racer* a, const Racer* b) { return a->place < b->place; });
+    for (size_t k = 0; k < order.size(); k++) {
+        Racer& r = *order[k];
+        r.hidden = k >= meta_.podium.size() || r.gone;
+        if (r.hidden) continue;
+        const GridSlot& g = meta_.podium[k];
+        Car& c = r.car;
+        V3 f(std::cos(g.heading), std::sin(g.heading), 0);
+        c.R = M3::fromAxes(norm(cross(f, V3(0, 0, 1))), f, V3(0, 0, 1));
+        float wheelZ = c.wheels.empty() ? 0.06f : -c.wheels[0].local.z + c.wheels[0].radius;
+        c.pos = g.pos + V3(0, 0, wheelZ + 0.003f);  // exactly on the step: no physics on the podium
+        c.vel = c.angVel = V3();
+        for (Wheel& w : c.wheels) { w.comp = 0; w.steer = 0; }
+    }
+    ghostVisible_ = false;
+    paused = false;
+    state_ = Podium;
+    podiumTime_ = 0;
+    return true;
+}
+
+void Game::podiumCamera(int x, int y, int w, int h) {
+    V3 c(0, 0, 0);
+    for (int k = 0; k < 3; k++) c += meta_.podium[k].pos;
+    c = c * (1.0f / 3);
+    float hd = meta_.podium[0].heading + std::sin(podiumTime_ * 0.3f) * 0.45f;  // slow sweep in front of it
+    float in = clampf(podiumTime_ / 2.5f, 0, 1);
+    float ease = in * in * (3 - 2 * in);
+    float dist = 4.8f - 1.2f * ease;  // a short move in, looking down onto the steps over the cups
+    V3 eye = c + V3(std::cos(hd), std::sin(hd), 0) * dist + V3(0, 0, 2.1f - 0.4f * ease);
+    V3 at = c + V3(0, 0, 0.12f);
+    M4 view = M4::lookAt(eye, at, V3(0, 0, 1));
+    camEye_ = eye;
+    camRight_ = V3(view.m[0], view.m[4], view.m[8]);
+    camUp_ = V3(view.m[1], view.m[5], view.m[9]);
+    viewProj0_ = M4::perspective(0.75f, (float)w / std::max(h, 1), 0.05f, 900.0f) * view;
+    eye0_ = eye;
+    if (cb.listener) cb.listener(eye, norm(at - eye), V3(0, 0, 1));
+    gfx_.beginFrame(x, y, w, h, view, M4::perspective(0.75f, (float)w / std::max(h, 1), 0.05f, 900.0f), eye);
+}
+
 void Game::render(int w, int h) {
     if (racers_.empty() || players_.empty()) return;
+    if (state_ == Podium) {
+        podiumCamera(0, 0, w, h);
+        draw();
+        camDt_ = 0;
+        return;
+    }
     int nv = (int)players_.size();
     int vh = h / nv;
     vp0_[0] = 0;

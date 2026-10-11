@@ -6,6 +6,7 @@
 //        WEATHER=preset WXCAT=sunny|cloudy|sunset|wet|rain
 //        TIME=s (timed race), PRACTICE=1, GHOST=1|2, CLASSES=a,b (AI classes, open race)
 //        STOP_AT=s      the player brakes to a stop at s (e.g. to watch the ghost drive on)
+//        PODIUM=1       show the prize ceremony after the race and screenshot it
 //        PREVIEW=skin,skin  render menu car previews of <class> and exit
 //        CHAOS=seed     the player drives erratically (crashes, flips) instead of on autopilot
 //        SHOTCLIP=m     screenshot whenever the player's drawn body is more than m metres inside the ground
@@ -236,6 +237,13 @@ int main(int argc, char** argv) {
         bool allDone = true;
         for (auto& r : game.racers()) allDone &= r.finished;
         if (allDone) break;
+    }
+    if (getenv("PODIUM")) {  // PODIUM=1: the prize ceremony after the race, shots at 1 s and 4 s
+        game.startPodium();
+        for (float t = 0; t < 4.05f; t += dt) {
+            game.update(dt, in);
+            if (std::fabs(t - 1) < dt / 2 || std::fabs(t - 4) < dt / 2) fprintf(stderr, "  podium shot %s\n", shoot("podium_").c_str());
+        }
     }
     printf("track=%s class=%s t=%.1fs maxSpeed=%.1f km/h events=%d bodyClip=%d wheelClip=%d minBody=%.3f minWheel=%.3f\n",
            track.c_str(), cls.c_str(), game.raceTime(), maxSpeed * 3.6f, gEvents, bodyClipFrames,
