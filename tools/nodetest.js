@@ -23,9 +23,11 @@ function el(id) {
       classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); },
         toggle(c, on) { (on === undefined ? !this._s.has(c) : on) ? this._s.add(c) : this._s.delete(c); }, contains(c) { return this._s.has(c); } },
       appendChild(c) { this.children.push(c); return c; },
+      append(...c) { this.children.push(...c); },
+      querySelectorAll() { return []; },
       addEventListener() {}, removeEventListener() {}, focus() {},
       getBoundingClientRect() { return { left: 0, top: 0, right: 1280, bottom: 720, width: 1280, height: 720 }; },
-      getContext: (type) => (type === 'webgl2' ? fakeGL() : null),
+      getContext: (type) => (type === 'webgl2' ? fakeGL() : type === '2d' ? fake2D() : null),
       toDataURL: () => 'data:image/png;base64,',
     };
     Object.defineProperty(e, 'innerHTML', { get() { return this._html || ''; }, set(v) { this._html = v; if (v === '') this.children = []; } });
@@ -38,6 +40,10 @@ const document = {
   createElement: (t) => { const e = el('__' + t + Math.random()); e.tagName = t; return e; },
   addEventListener() {}, hidden: false, body: el('body'),
 };
+
+function fake2D() {
+  return { clearRect() {}, putImageData() {}, drawImage() {}, scale() {}, fillRect() {} };
+}
 
 // ---- fake WebGL2: every call succeeds; counts draws
 let glCalls = 0, drawCalls = 0, texUploads = 0;
@@ -113,6 +119,7 @@ const ctx = {
   requestAnimationFrame: (f) => raf.push(f), AudioContext: FakeAudioContext, WebAssembly, TextDecoder, TextEncoder,
   Audio: class { constructor() { this.loop = false; this.volume = 1; } play() { audioLog.music = true; return Promise.resolve(); } pause() {} },
   WebGLRenderingContext: class {}, WebGL2RenderingContext: class {},
+  ImageData: class { constructor(data, w, h) { this.data = data; this.width = w; this.height = h; } },
   addEventListener() {}, removeEventListener() {}, devicePixelRatio: 1, innerWidth: 1280, innerHeight: 720,
   getComputedStyle: () => ({ width: '1280px', height: '720px' }),
 };

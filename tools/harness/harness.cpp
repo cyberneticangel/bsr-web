@@ -5,6 +5,7 @@
 //        options via env: CAM=0|1|2, OPP=n, LAPS=n, TOP=kmh, SKINS=a,b,c
 //        TIME=s (timed race), PRACTICE=1, GHOST=1|2, CLASSES=a,b (AI classes, open race)
 //        STOP_AT=s      the player brakes to a stop at s (e.g. to watch the ghost drive on)
+//        PREVIEW=skin,skin  render menu car previews of <class> and exit
 //        CHAOS=seed     the player drives erratically (crashes, flips) instead of on autopilot
 //        SHOTCLIP=m     screenshot whenever the player's drawn body is more than m metres inside the ground
 //        Prints bodyClip/wheelClip: frames in which any car's drawn body/wheels were inside the ground.
@@ -124,6 +125,18 @@ int main(int argc, char** argv) {
     int laps = getenv("LAPS") ? atoi(getenv("LAPS")) : 3;
     float top = getenv("TOP") ? (float)atof(getenv("TOP")) : 58;
     std::string wx = getenv("WEATHER") ? getenv("WEATHER") : "sunny_bluesky_summer";
+    if (getenv("PREVIEW")) {  // PREVIEW=skin1,skin2,...: menu car previews of <class> into <out dir>
+        std::string list = getenv("PREVIEW");
+        for (size_t p = 0; p < list.size();) {
+            size_t e = list.find(',', p);
+            if (e == std::string::npos) e = list.size();
+            std::string skin = list.substr(p, e - p);
+            std::vector<uint8_t> px;
+            if (game.renderPreview(cls, skin, 320, 200, px)) writePNG(out + "/preview_" + cls + "_" + skin + ".png", 320, 200, px);
+            p = e + 1;
+        }
+        return 0;
+    }
     RaceConfig cfg;
     cfg.track = track;
     cfg.weather = wx;

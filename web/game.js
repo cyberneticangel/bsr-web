@@ -7,6 +7,9 @@ const CLASS_NAMES = {
   skilled_std: 'Skilled', skilled_hop: 'Skilled Hop-up', expert_std: 'Expert', expert_hop: 'Expert Hop-up',
   pro_std: 'Pro', pro_hop: 'Pro Hop-up', Monster: 'Monster Truck',
 };
+// Skin n of every class is team n (Languages/English.bin team1..team12; the logos on the cars match).
+const TEAMS = ['Solar', 'Killroy', 'YinYang', 'daBomb', 'Eyeball', 'Nukem', 'Alien', 'HotLips', 'Bulls', 'Skullz',
+  'Electron', 'Flash'];
 const className = (c) => CLASS_NAMES[Object.keys(CLASS_NAMES).find((k) => k.toLowerCase() === String(c).toLowerCase())] || c;
 const params = new URLSearchParams(location.search);
 const $ = (id) => document.getElementById(id);
@@ -340,16 +343,62 @@ function buildMenu() {
   refreshSel();
 }
 
+// Car previews for the skin picker, rendered by the engine (bsr_preview) once the class's files are loaded.
+const Previews = {
+  urls: {},       // 'cls|skin index' -> data URL
+  loading: {},    // cls -> Promise
+  W: 192, H: 120,
+  // Resolves once every skin of the class has a preview.
+  load(cls) {
+    if (this.loading[cls]) return this.loading[cls];
+    return (this.loading[cls] = (async () => {
+      await fetchFiles(manifest.classes[cls].files || [], () => {});
+      const canvas = document.createElement('canvas');
+      canvas.width = this.W;
+      canvas.height = this.H;
+      const g = canvas.getContext('2d');
+      manifest.classes[cls].skins.forEach((skin, i) => {
+        const ptr = Module.ccall('bsr_preview', 'number', ['string', 'string', 'number', 'number'], [cls, skin, this.W, this.H]);
+        if (!ptr) return;
+        const img = new ImageData(new Uint8ClampedArray(Module.HEAPU8.buffer, ptr, this.W * this.H * 4).slice(), this.W, this.H);
+        g.clearRect(0, 0, this.W, this.H);
+        g.putImageData(img, 0, 0);
+        // GL rows are bottom-up: flip by drawing the canvas onto itself mirrored.
+        const flipped = document.createElement('canvas');
+        flipped.width = this.W;
+        flipped.height = this.H;
+        const fg = flipped.getContext('2d');
+        fg.scale(1, -1);
+        fg.drawImage(canvas, 0, -this.H);
+        this.urls[cls + '|' + i] = flipped.toDataURL('image/png');
+      });
+    })().catch((e) => { console.warn('previews', e); delete this.loading[cls]; }));
+  },
+  url(cls, i) { return this.urls[cls + '|' + i] || ''; },
+};
+
 function skinButtons(container, current, onPick) {
   container.innerHTML = '';
-  manifest.classes[sel.cls].skins.forEach((s, i) => {
+  const cls = sel.cls;
+  manifest.classes[cls].skins.forEach((s, i) => {
     const b = document.createElement('button');
-    b.textContent = i + 1;
-    b.title = s;
+    b.className = 'skin';
+    b.title = `${TEAMS[i] || 'Team ' + (i + 1)} (${s})`;
+    const img = document.createElement('img');
+    img.alt = '';
+    img.src = Previews.url(cls, i) || 'data:,';
+    const cap = document.createElement('span');
+    cap.textContent = TEAMS[i] || i + 1;
+    b.append(img, cap);
     b.classList.toggle('sel', i === current);
-    b.onclick = () => { onPick(i); refreshSel(); };
+    b.onclick = () => { onPick(i); refreshSel(); Audio.play('menu_leftright', 0.5); };
     container.appendChild(b);
   });
+  if (!Previews.url(cls, 0))
+    Previews.load(cls).then(() => {
+      if (sel.cls !== cls) return;
+      container.querySelectorAll('img').forEach((img, i) => { img.src = Previews.url(cls, i) || 'data:,'; });
+    });
 }
 
 function refreshSel() {
@@ -811,7 +860,7 @@ const Net = {
       const prof = p.id === this.id ? { skin: sel.skin, cls: sel.cls } : this.profiles[p.id];
       const skin = prof ? prof.skin : null;
       const cls = sel.raceType === 'open' && prof && prof.cls ? ` <span class="tag">${esc(className(prof.cls))}</span>` : '';
-      return `<li>${esc(p.name)}${cls}${skin !== null ? ` <span class="tag">skin ${skin + 1}</span>` : ''}` +
+      return `<li>${esc(p.name)}${cls}${skin !== null ? ` <span class="tag">${esc(TEAMS[skin] || 'skin ' + (skin + 1))}</span>` : ''}` +
         `${tags ? ` <span class="tag">(${tags})</span>` : ''}</li>`;
     }).join('');
   },

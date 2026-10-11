@@ -573,6 +573,34 @@ void Game::render(int w, int h) {
     camDt_ = 0;
 }
 
+bool Game::renderPreview(const std::string& clsIn, const std::string& skin, int w, int h, std::vector<uint8_t>& rgba) {
+    std::unique_ptr<CarModel> cm(carModel(lower(clsIn), skin));
+    if (!cm) return false;
+    V3 lo = cm->bodyLo, hi = cm->bodyHi;
+    for (int k = 0; k < 4; k++)
+        if (cm->wheel[k]) {
+            lo = V3(std::min(lo.x, cm->wheel[k]->bmin.x), std::min(lo.y, cm->wheel[k]->bmin.y), std::min(lo.z, cm->wheel[k]->bmin.z));
+            hi = V3(std::max(hi.x, cm->wheel[k]->bmax.x), std::max(hi.y, cm->wheel[k]->bmax.y), std::max(hi.z, cm->wheel[k]->bmax.z));
+        }
+    V3 c = (lo + hi) * 0.5f;
+    float r = len(hi - lo) * 0.5f;
+    // Three-quarter view from the front right, slightly above (the model faces +Y).
+    V3 eye = c + norm(V3(0.95f, 1.25f, 0.6f)) * (r * 2.05f);
+    float fov = 0.75f;
+    gfx_.beginOffscreen(w, h);
+    gfx_.beginFrame(0, 0, w, h, M4::lookAt(eye, c, V3(0, 0, 1)), M4::perspective(fov, (float)w / h, r * 0.2f, r * 10), eye);
+    gfx_.clearColor(0, 0, 0, 0);
+    gfx_.fogOff = true;
+    for (Part* p : cm->parts) gfx_.drawPart(*p, M4(), Pass::Opaque);
+    for (int k = 0; k < 4; k++)
+        if (cm->wheel[k]) gfx_.drawPart(*cm->wheel[k], M4(), Pass::Opaque);
+    for (Part* p : cm->parts) gfx_.drawPart(*p, M4(), Pass::Blend);
+    gfx_.fogOff = false;
+    gfx_.endOffscreen(rgba);
+    gfx_.release(cm->model);
+    return true;
+}
+
 std::string Game::hudJson(int pl) const {
     if (pl < 0 || pl >= (int)players_.size()) return "{}";
     const Racer& p = racers_[players_[pl].racer];

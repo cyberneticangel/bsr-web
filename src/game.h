@@ -62,6 +62,8 @@ public:
     void setCamera(int m);
     void resetPlayer(int p = 0);
     std::string hudJson(int p = 0) const;
+    // Renders one car (class, skin texture) on a transparent background for the menu. rgba: w*h*4, rows bottom-up.
+    bool renderPreview(const std::string& cls, const std::string& skin, int w, int h, std::vector<uint8_t>& rgba);
     std::string resultsJson() const;
 
     // Networking. now: local clock in seconds.

@@ -298,6 +298,36 @@ void Renderer::buildModel(const FSO& fso, const std::string& texDir, Model& out,
     }
 }
 
+void Renderer::beginOffscreen(int w, int h) {
+    if (!offFbo_) {
+        glGenFramebuffers(1, &offFbo_);
+        glGenRenderbuffers(1, &offCol_);
+        glGenRenderbuffers(1, &offDep_);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, offFbo_);
+    if (w != offW_ || h != offH_) {
+        offW_ = w;
+        offH_ = h;
+        glBindRenderbuffer(GL_RENDERBUFFER, offCol_);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, w, h);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, offCol_);
+        glBindRenderbuffer(GL_RENDERBUFFER, offDep_);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, offDep_);
+    }
+}
+
+void Renderer::endOffscreen(std::vector<uint8_t>& rgba) {
+    rgba.resize((size_t)offW_ * offH_ * 4);
+    glReadPixels(0, 0, offW_, offH_, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void Renderer::clearColor(float r, float g, float b, float a) {
+    glClearColor(r, g, b, a);
+    glClear(GL_COLOR_BUFFER_BIT);
+}
+
 void Renderer::release(Model& m) {
     for (Part& p : m.parts) {
         glDeleteVertexArrays(1, &p.vao);
@@ -336,7 +366,7 @@ void Renderer::drawPart(const Part& p, const M4& world, Pass pass, float alphaMu
     glUseProgram(prog_);
     glUniformMatrix4fv(uMVP_, 1, GL_FALSE, mvp.m);
     glUniformMatrix4fv(uModel_, 1, GL_FALSE, model.m);
-    glUniform2f(uFogRange_, p.noFog ? 1e6f : fogStart_, p.noFog ? 2e6f : fogEnd_);
+    glUniform2f(uFogRange_, p.noFog || fogOff ? 1e6f : fogStart_, p.noFog || fogOff ? 2e6f : fogEnd_);
     for (const Batch& b : p.batches) {
         bool isBlend = b.blend || alphaMul < 1.0f;
         if ((pass == Pass::Blend) != isBlend) continue;

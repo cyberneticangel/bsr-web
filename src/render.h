@@ -56,6 +56,11 @@ public:
     void setFog(float r, float g, float b, float start, float end) { fog_[0] = r; fog_[1] = g; fog_[2] = b; fogStart_ = start; fogEnd_ = end; }
     void setTint(float r, float g, float b) { tint_[0] = r; tint_[1] = g; tint_[2] = b; }
     void drawLines(const std::vector<float>& xyz, float r, float g, float b);
+    // Offscreen RGBA target (menu previews): begin binds it, end reads it back (rows bottom-up) and unbinds.
+    void beginOffscreen(int w, int h);
+    void endOffscreen(std::vector<uint8_t>& rgba);
+    void clearColor(float r, float g, float b, float a);
+    bool fogOff = false;  // draw without fog
 
 private:
     GLuint prog_ = 0, lineProg_ = 0, lineVbo_ = 0, lineVao_ = 0, white_ = 0;
@@ -67,6 +72,8 @@ private:
     float fog_[3] = {0.7f, 0.75f, 0.8f}, fogStart_ = 60, fogEnd_ = 250;
     float tint_[3] = {1, 1, 1};
     std::map<std::string, Texture> texCache_;
+    GLuint offFbo_ = 0, offCol_ = 0, offDep_ = 0;
+    int offW_ = 0, offH_ = 0;
 };
 
 }  // namespace bsr

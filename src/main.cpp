@@ -230,6 +230,13 @@ EMSCRIPTEN_KEEPALIVE void bsr_put_state(int racer, const float* snap) {
 }
 EMSCRIPTEN_KEEPALIVE void bsr_remove_racer(int racer) { game.removeRacer(racer); }
 
+// Renders a car preview for the menu; returns a pointer to w*h RGBA pixels (rows bottom-up), or 0.
+EMSCRIPTEN_KEEPALIVE const uint8_t* bsr_preview(const char* cls, const char* skin, int w, int h) {
+    static std::vector<uint8_t> px;
+    if (!game.renderPreview(cls, skin, w, h, px)) return nullptr;
+    return px.data();
+}
+
 // Trackside speaker positions as JSON [[x,y,z],...] (valid once a race has started on the track).
 EMSCRIPTEN_KEEPALIVE const char* bsr_speakers() {
     static std::string out;

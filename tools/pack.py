@@ -73,8 +73,8 @@ def main(data, web):
     common = set()
     for c in CLASSES:
         rel = 'cars/car_%s.fso' % c.lower()
-        common.add(rel)
-        common |= fso_textures(rel, '')
+        cls_files = {rel} | fso_textures(rel, '')
+        common |= cls_files
         skins = []
         for i in range(1, 13):
             fsm = 'cars/mats_%s_%02d.fsm' % (c.lower(), i)
@@ -86,9 +86,11 @@ def main(data, web):
                 fl = tex_files(t, '')
                 if fl and fl[0].startswith('maps_cars/'):
                     skins.append(t)
-                    common.update(fl)
+                    cls_files.update(fl)
                     break
-        manifest['classes'][c] = {'skins': skins}
+        common |= cls_files
+        # files: everything needed to draw this class (the menu loads them for the skin previews)
+        manifest['classes'][c] = {'skins': skins, 'files': sorted(cls_files)}
     names = list(SOUNDS)
     for rel in sorted(index):
         base = os.path.basename(index[rel]).rsplit('.', 1)[0]
