@@ -36,6 +36,9 @@ FX_TEXTURES = ['FX_tiresmoke_jun_std', 'FX_tiresmoke_jun_hop', 'FX_tiresmoke_trn
                'FX_tiresmoke_skl_std', 'FX_tiresmoke_skl_hop', 'FX_tiresmoke_exp_std', 'FX_tiresmoke_exp_hop',
                'FX_tiresmoke_pro_std', 'FX_tiresmoke_pro_hop', 'FX_spray', 'FX_spray_rain', 'FX_spray_wet',
                'FX_rain_J', 'FX_EngineSmoke_Std_A']
+# The original HUD graphics (decoded in web/game.js): label bars, speed/rev meters, the countdown digits.
+HUD_TEXTURES = ['hud_bar', 'hud_position', 'hud_lap', 'hud_bestlap', 'hud_currentlap', 'hud_timeremaining',
+                'hud_speed', 'hud_speedback', 'hud_revs', 'hud_revsback', 'Font_54321']
 # Data/Music.ini: music per game state, and three genres of on-track music. Every on-track song exists as
 # .fs3 (stereo MP3) and .fsw (mono 11 kHz WAV, for "localized" music played from the trackside speakers).
 MUSIC_STATES = {'menu': 'music_bsr_take3a', 'finish': 'music_bsr_take5', 'podium': '61 Track61',
@@ -169,6 +172,12 @@ def main(data, web):
                 common.update(tex_files(to, ''))
     for name in FX_TEXTURES:
         common.update(tex_files(name, ''))
+    manifest['hud'] = {}
+    for name in HUD_TEXTURES:
+        fl = tex_files(name, '')
+        common.update(fl)
+        if fl:
+            manifest['hud'][name.lower()] = fl[0]
     manifest['common'] = sorted(common)
     used |= common
     total = 0

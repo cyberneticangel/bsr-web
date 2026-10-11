@@ -55,29 +55,37 @@ button.big { display: block; width: 100%; margin: 18px 0 8px; padding: 12px; fon
 #status .bar { height: 6px; background: #2a2f38; border-radius: 3px; overflow: hidden; margin-top: 6px; }
 #status .bar div { height: 100%; background: var(--accent); width: 0; transition: width .1s; }
 
-#hud { position: fixed; inset: 0; pointer-events: none; font-weight: bold; text-shadow: 0 2px 3px rgba(0,0,0,.8); }
-.hud-view { position: absolute; inset: 0; }
+/* HUD: the original's graphics (red label bars, segmented speed/rev meters, countdown digits), decoded from
+   the game's textures into --img-* variables by game.js. Everything is sized in em: --hud scales it. */
+#hud { --hud: 1; position: fixed; inset: 0; pointer-events: none; font-family: "Arial Black", "Trebuchet MS", sans-serif;
+  font-weight: 900; font-style: italic; text-shadow: 0 0.08em 0.15em rgba(0,0,0,.8); }
+.hud-view { position: absolute; inset: 0; font-size: calc(16px * var(--hud)); }
 #hud-p2 { display: none; }
-/* Split screen: player 1 on top, player 2 below, smaller type. */
 #hud.split #hud-p1 { bottom: 50%; }
 #hud.split #hud-p2 { display: block; top: 50%; border-top: 3px solid var(--accent); }
-#hud.split .hud-tl .pos { font-size: 38px; }
-#hud.split .hud-tl .pos small, #hud.split .hud-tr div:first-child { font-size: 18px; }
-#hud.split .hud-tl .lap, #hud.split .hud-tr { font-size: 15px; }
-#hud.split .hud-br { font-size: 38px; bottom: 10px; }
-#hud.split .countdown { font-size: 72px; top: 24%; }
-#hud.split .msg { font-size: 28px; top: 16%; }
-.hud-tl { position: absolute; left: 16px; top: 12px; }
-.hud-tl .pos { font-size: 54px; font-style: italic; color: var(--accent); line-height: 1; }
-.hud-tl .pos small { font-size: 24px; color: var(--fg); }
-.hud-tl .lap { font-size: 20px; }
-.hud-tr { position: absolute; right: 16px; top: 14px; text-align: right; font-size: 18px; font-variant-numeric: tabular-nums; }
-.hud-tr div:first-child { font-size: 24px; }
-.hud-br { position: absolute; right: 20px; bottom: 16px; font-size: 56px; font-style: italic; font-variant-numeric: tabular-nums; }
-.hud-br small { font-size: 18px; margin-left: 6px; }
-.hud-keys { position: absolute; left: 16px; bottom: 12px; font-size: 12px; color: var(--muted); font-weight: normal; }
-.countdown { position: absolute; left: 0; right: 0; top: 30%; text-align: center; font-size: 120px; color: var(--accent); font-style: italic; }
-.msg { position: absolute; left: 0; right: 0; top: 22%; text-align: center; font-size: 40px; font-style: italic; }
+#hud.split .hud-view { font-size: calc(11px * var(--hud)); }
+.hbar { display: flex; align-items: center; justify-content: space-between; gap: 0.6em; width: 13em; height: 1.55em;
+  padding: 0 0.7em 0 0.9em; margin-bottom: 0.3em; background: var(--img) center / 100% 100% no-repeat, none;
+  color: #fff; font-size: 1em; line-height: 1; }
+.hbar .hl { font-size: 0.7em; letter-spacing: 0.06em; opacity: 0.9; }
+.hbar .hv { font-size: 1em; font-variant-numeric: tabular-nums; }
+.hbar .hv b { color: var(--accent); font-size: 1.35em; }
+.hbar .hv small { font-size: 0.75em; }
+.hud-tl { position: absolute; left: 1em; top: 0.9em; }
+.hud-tr { position: absolute; right: 1em; top: 0.9em; }
+.hud-tr .hbar { width: 14em; }
+.hud-br { position: absolute; right: 1.2em; bottom: 1em; display: flex; flex-direction: column; align-items: flex-end; gap: 0.25em; }
+.meter { position: relative; width: 12em; height: 3em; }
+.meter::before { content: ""; position: absolute; inset: 0; background: var(--img) left / 12em 100% no-repeat; opacity: 0.3; }
+.meter .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--img) left / 12em 100% no-repeat; }
+.hud-br .speed { font-size: 2.6em; line-height: 1; font-variant-numeric: tabular-nums; }
+.hud-br .speed small { font-size: 0.32em; margin-left: 0.3em; }
+.hud-keys { position: absolute; left: 16px; bottom: 12px; font: 12px "Trebuchet MS", sans-serif; color: var(--muted); }
+.countdown { position: absolute; left: 50%; top: 26%; width: 0; height: 0; }
+.countdown i { position: absolute; transform: translate(-50%, -50%); background: var(--img-font_54321) no-repeat;
+  animation: pop 0.9s ease-out; }
+@keyframes pop { 0% { opacity: 0; scale: 1.6; } 15% { opacity: 1; scale: 1; } 80% { opacity: 1; } 100% { opacity: 0.2; } }
+.msg { position: absolute; left: 0; right: 0; top: 18%; text-align: center; font-size: 2.4em; color: #fff; }
 #res-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 #res-table td, #res-table th { padding: 6px 8px; border-bottom: 1px solid #2a2f38; text-align: left; }
 #res-table tr.me td { color: var(--accent); font-weight: bold; }
@@ -92,8 +100,8 @@ button.big { display: block; width: 100%; margin: 18px 0 8px; padding: 12px; fon
 .t-btns #t-gas { background: rgba(255,204,26,.35); }
 @media (max-width: 600px) {
   #net-players { margin-left: 0; }
-  .hud-tl .pos { font-size: 40px; }
-  .hud-br { font-size: 40px; bottom: 140px; }
+  .hud-view { font-size: calc(11px * var(--hud)); }
+  .hud-br { bottom: 150px; }
   .hud-keys { display: none; }
   h1 { font-size: 26px; }
 }

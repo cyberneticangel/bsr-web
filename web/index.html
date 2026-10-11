@@ -11,37 +11,29 @@
 <div id="flash"></div>
 
 <div id="hud" class="hidden">
-  <div class="hud-view" id="hud-p1">
-    <div class="hud-tl">
-      <div class="pos"><span id="h-place">1</span><small>/<span id="h-racers">1</span></small></div>
-      <div class="lap">LAP <span id="h-lap">1</span><span id="h-lapsof">/<span id="h-laps">3</span></span></div>
-    </div>
-    <div class="hud-tr">
-      <div><span id="h-timelabel">TIME</span> <span id="h-time">0:00.00</span></div>
-      <div>LAP <span id="h-laptime">0:00.00</span></div>
-      <div>BEST <span id="h-best">-:--.--</span></div>
-    </div>
-    <div class="hud-br"><span id="h-speed">0</span><small>km/h</small></div>
-    <div id="h-countdown" class="countdown"></div>
-    <div id="h-msg" class="msg"></div>
-    <div id="h-keys" class="hud-keys">↑↓←→ drive · Space handbrake · C camera · R reset · P pause</div>
-  </div>
-  <div class="hud-view" id="hud-p2">
-    <div class="hud-tl">
-      <div class="pos"><span id="h2-place">1</span><small>/<span id="h2-racers">1</span></small></div>
-      <div class="lap">LAP <span id="h2-lap">1</span><span id="h2-lapsof">/<span id="h2-laps">3</span></span></div>
-    </div>
-    <div class="hud-tr">
-      <div><span id="h2-timelabel">TIME</span> <span id="h2-time">0:00.00</span></div>
-      <div>LAP <span id="h2-laptime">0:00.00</span></div>
-      <div>BEST <span id="h2-best">-:--.--</span></div>
-    </div>
-    <div class="hud-br"><span id="h2-speed">0</span><small>km/h</small></div>
-    <div id="h2-countdown" class="countdown"></div>
-    <div id="h2-msg" class="msg"></div>
-    <div id="h2-keys" class="hud-keys">↑↓←→ drive · Right Shift handbrake · . camera · Backspace reset</div>
-  </div>
+  <!-- one .hud-view per local player, filled from the template below (ids prefixed h- / h2-) -->
+  <div class="hud-view" id="hud-p1" data-pre="h-"></div>
+  <div class="hud-view" id="hud-p2" data-pre="h2-"></div>
 </div>
+<template id="hud-tpl">
+  <div class="hud-tl">
+    <div class="hbar" data-img="hud_position"><span class="hl">POS.</span><span class="hv"><b id="$place">1</b><small>/<span id="$racers">1</span></small></span></div>
+    <div class="hbar" data-img="hud_lap"><span class="hl">LAP</span><span class="hv"><span id="$lap">1</span><small id="$lapsof">/<span id="$laps">3</span></small></span></div>
+  </div>
+  <div class="hud-tr">
+    <div class="hbar" data-img="hud_timeremaining"><span class="hl" id="$timelabel">TIME</span><span class="hv" id="$time">0:00.00</span></div>
+    <div class="hbar" data-img="hud_currentlap"><span class="hl">CURR. LAP</span><span class="hv" id="$laptime">0:00.00</span></div>
+    <div class="hbar" data-img="hud_bestlap"><span class="hl">BEST LAP</span><span class="hv" id="$best">-:--.--</span></div>
+  </div>
+  <div class="hud-br">
+    <div class="meter" data-img="hud_revsback"><div class="fill" data-img="hud_revs" id="$rev"></div></div>
+    <div class="meter" data-img="hud_speedback"><div class="fill" data-img="hud_speed" id="$spd"></div></div>
+    <div class="speed"><span id="$speed">0</span><small>KPH</small></div>
+  </div>
+  <div id="$countdown" class="countdown"></div>
+  <div id="$msg" class="msg"></div>
+  <div id="$keys" class="hud-keys"></div>
+</template>
 
 <div id="touch" class="hidden">
   <div id="t-steer" class="t-pad"><div id="t-knob"></div></div>
@@ -88,6 +80,7 @@
     <button data-v="0">Off</button><button data-v="1">Best lap</button><button data-v="2">Last lap</button></div></div>
   <div class="row"><label>Music</label><div id="musicmode" class="choices">
     <button data-v="stereo" title="Normal music">Stereo</button><button data-v="localized" title="Played by the loudspeakers around the track">Localized</button><button data-v="off">Off</button></div></div>
+  <div class="row"><label>HUD size</label><input id="hudscale" type="range" min="60" max="160" step="10" value="100"><span id="hudscale-v">100%</span></div>
   <div class="row" id="row-genres"><label>Genres</label><div id="genres" class="choices">
     <button data-v="surf">50's surf</button><button data-v="rock">Rock</button><button data-v="dance">Dance</button></div></div>
   <button id="go" class="big">RACE</button>

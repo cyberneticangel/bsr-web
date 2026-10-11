@@ -69,7 +69,8 @@ void Effects::update(float dt, const std::vector<Racer>& racers, const Collision
             V3 ground = hub - up * w.radius;
             float& owed = emit_[i * 4 + k];
             // Skid marks: a ribbon per wheel while it slides.
-            bool marking = w.contact && w.slide > 0.3f && speed > 0.8f && !wet_;
+            // Hysteresis, so a slide hovering around the threshold leaves one ribbon rather than dashes.
+            bool marking = w.contact && w.slide > (tr.active ? 0.15f : 0.3f) && speed > 0.8f && !wet_;
             if (marking) {
                 float half = std::max(0.018f, w.radius * 0.35f);
                 V3 l = ground - right * half + up * 0.003f, rr = ground + right * half + up * 0.003f;
@@ -108,7 +109,7 @@ void Effects::update(float dt, const std::vector<Racer>& racers, const Collision
                 }
             } else {  // tire smoke while sliding or locked
                 if (w.slide < 0.35f || speed < 1.2f) { owed = 0; continue; }
-                owed += dt * w.slide * 34.0f;
+                owed += dt * w.slide * 22.0f;
                 for (; owed >= 1; owed -= 1) {
                     Puff p;
                     p.p = ground + up * 0.03f;
@@ -117,7 +118,7 @@ void Effects::update(float dt, const std::vector<Racer>& racers, const Collision
                     p.life = 0.8f + rnd() * 0.6f;
                     p.size0 = 0.05f;
                     p.size1 = 0.3f + rnd() * 0.15f + w.radius;
-                    p.alpha = 0.45f * w.slide + 0.2f;
+                    p.alpha = 0.3f * w.slide + 0.1f;
                     p.tex = smokeTex_.empty() ? 2 : smokeTex_[i % smokeTex_.size()];
                     p.rot = rnd() * 6.283f;
                     p.spin = (rnd() - 0.5f) * 1.5f;

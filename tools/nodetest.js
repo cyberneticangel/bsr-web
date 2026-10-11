@@ -18,7 +18,7 @@ const elements = {};
 function el(id) {
   if (!elements[id]) {
     const e = {
-      id, children: [], style: {}, dataset: {}, value: '', checked: true, disabled: false, textContent: '', innerHTML: '',
+      id, children: [], style: { setProperty() {} }, dataset: {}, value: '', checked: true, disabled: false, textContent: '', innerHTML: '',
       title: '', width: 1280, height: 720, clientWidth: 1280, clientHeight: 720,
       classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); },
         toggle(c, on) { (on === undefined ? !this._s.has(c) : on) ? this._s.add(c) : this._s.delete(c); }, contains(c) { return this._s.has(c); } },

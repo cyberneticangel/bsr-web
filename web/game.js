@@ -302,6 +302,82 @@ const Records = {
   },
 };
 
+// ------------------------------------------------------------------ HUD
+// .fsp texture -> RGBA image data URL (header, XOR, TGA-style RLE, rows bottom-up; see FORMATS.md).
+function fspToURL(u8) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const w = dv.getUint32(0, true), h = dv.getUint32(4, true), fmt = dv.getUint32(8, true), size = dv.getUint32(16, true);
+  const bpp = { 2: 2, 4: 2, 5: 2, 7: 3, 11: 4 }[fmt];
+  if (!bpp) return '';
+  const src = xorInPlace(u8.slice(20, 20 + size));
+  const px = new Uint8Array(w * h * bpp);
+  for (let i = 0, o = 0; i < src.length && o < px.length;) {
+    const c = src[i++], n = (c & 0x7f) + 1;
+    if (c & 0x80) { for (let k = 0; k < n; k++) px.set(src.subarray(i, i + bpp), o + k * bpp); i += bpp; }
+    else { px.set(src.subarray(i, i + n * bpp), o); i += n * bpp; }
+    o += n * bpp;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const g = canvas.getContext('2d');
+  if (!g) return '';
+  const img = g.createImageData(w, h);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const s = ((h - 1 - y) * w + x) * bpp, d = (y * w + x) * 4;
+      if (bpp >= 3) { img.data[d] = px[s + 2]; img.data[d + 1] = px[s + 1]; img.data[d + 2] = px[s]; img.data[d + 3] = bpp === 4 ? px[s + 3] : 255; }
+      else {
+        const v = px[s] | px[s + 1] << 8;
+        if (fmt === 5) { img.data[d] = (v >> 8 & 15) * 17; img.data[d + 1] = (v >> 4 & 15) * 17; img.data[d + 2] = (v & 15) * 17; img.data[d + 3] = (v >> 12) * 17; }
+        else { img.data[d] = (v >> 11) * 8; img.data[d + 1] = (v >> 5 & 63) * 4; img.data[d + 2] = (v & 31) * 8; img.data[d + 3] = 255; }
+      }
+    }
+  g.putImageData(img, 0, 0);
+  return canvas.toDataURL('image/png');
+}
+
+const Hud = {
+  // Countdown glyphs in Font_54321 (256x128): x, y, w, h.
+  digits: { 5: [4, 0, 46, 62], 4: [64, 0, 48, 62], 3: [124, 0, 46, 60], 2: [4, 60, 46, 53], 1: [64, 60, 36, 53],
+    go: [108, 58, 114, 57] },
+  shown: ['', ''],
+  // Builds both player views from the template (ids "$x" -> "h-x" / "h2-x").
+  build() {
+    const tpl = $('hud-tpl').innerHTML;
+    for (const v of document.querySelectorAll('.hud-view')) v.innerHTML = tpl.replace(/\$(\w+)/g, v.dataset.pre + '$1');
+    for (const el of document.querySelectorAll('#hud [data-img]')) el.style.setProperty('--img', `var(--img-${el.dataset.img})`);
+    this.scale(Settings.hudScale || 1);
+  },
+  async loadImages() {
+    const files = Object.values(manifest.hud || {});
+    await fetchFiles(files, () => {});
+    for (const [name, path] of Object.entries(manifest.hud || {})) {
+      const url = fspToURL(Module.FS.readFile('/data/' + path));
+      if (url) $('hud').style.setProperty('--img-' + name, `url(${url})`);
+    }
+  },
+  scale(k) { $('hud').style.setProperty('--hud', k); },
+  // The original's countdown digits; key: 1..5 or 'go'.
+  countdown(p, key) {
+    const pre = p ? 'h2-' : 'h-';
+    if (this.shown[p] === key) return;
+    this.shown[p] = key;
+    const el = $(pre + 'countdown');
+    el.innerHTML = '';
+    const d = this.digits[key];
+    if (!d) return;
+    const i = document.createElement('i');
+    const k = 6;  // em per 64 px of the sheet
+    const u = (v) => (v / 64 * k).toFixed(3) + 'em';
+    Object.assign(i.style, { width: u(d[2]), height: u(d[3]), backgroundPosition: `-${u(d[0])} -${u(d[1])}`,
+      backgroundSize: `${u(256)} ${u(128)}`, fontSize: '1em' });
+    el.appendChild(i);
+    if (key === 'go') setTimeout(() => { if (this.shown[p] === 'go') this.countdown(p, ''); }, 900);
+  },
+};
+Hud.build();
+
 // A lightning flash over the whole screen.
 function lightning() {
   const el = $('flash');
@@ -381,6 +457,14 @@ function buildMenu() {
     Settings.save();
     refreshSel();
     if (Settings.musicMode === 'off') Audio.stopMusic(); else Audio.menuMusic();
+  };
+  $('hudscale').value = Math.round((Settings.hudScale || 1) * 100);
+  $('hudscale-v').textContent = $('hudscale').value + '%';
+  $('hudscale').oninput = () => {
+    Settings.hudScale = +$('hudscale').value / 100;
+    $('hudscale-v').textContent = $('hudscale').value + '%';
+    Hud.scale(Settings.hudScale);
+    Settings.save();
   };
   for (const b of $('genres').children) b.onclick = () => {
     Settings.genres[b.dataset.v] = !Settings.genres[b.dataset.v];
@@ -597,6 +681,8 @@ async function startRace(opts) {
     for (const pre of ['h-', 'h2-']) $(pre + 'msg').textContent = '';
     $('h-keys').textContent = local > 1 ? 'WASD drive · Space handbrake · C camera · R reset · P pause'
       : '↑↓←→ drive · Space handbrake · C camera · R reset' + (opts.online ? ' · Esc menu' : ' · P pause');
+    $('h2-keys').textContent = '↑↓←→ drive · Right Shift handbrake · . camera · Backspace reset';
+    Hud.shown = ['', ''];
     $('canvas').focus();
     Audio.startRace(opts.cls, race.local);
     Audio.weather(opts.weather, opts.weatherCat);
@@ -698,7 +784,10 @@ var Module = {
     $(pre + 'laptime').textContent = fmtTime(h.lapTime);
     $(pre + 'best').textContent = fmtTime(h.best);
     $(pre + 'speed').textContent = Math.round(h.speed);
-    $(pre + 'countdown').textContent = h.countdown > 0 && !h.waiting ? h.countdown : '';
+    $(pre + 'spd').style.width = Math.min(100, h.speed / Math.max(h.top, 1) * 100).toFixed(1) + '%';
+    $(pre + 'rev').style.width = Math.min(100, h.rpm * 85).toFixed(1) + '%';
+    if (h.countdown > 0 && !h.waiting) Hud.countdown(p, Math.min(5, h.countdown));
+    else if (Hud.shown[p] !== 'go') Hud.countdown(p, '');
     if (h.waiting) $(pre + 'msg').textContent = 'Waiting for players…';
     else if ($(pre + 'msg').textContent === 'Waiting for players…') $(pre + 'msg').textContent = '';
   },
@@ -710,7 +799,7 @@ var Module = {
     const h = hudStates[p];
     const who = race && race.local > 1 ? `P${p + 1} ` : '';
     if (name === 'beep') Audio.play('menu_updown', 0.8);
-    else if (name === 'go') { Audio.play('menu_action', 1); flash('GO!', 900); }
+    else if (name === 'go') { Audio.play('menu_action', 1); Hud.countdown(0, 'go'); Hud.countdown(1, 'go'); }
     else if (name === 'lap') flash('LAP ' + h.lap, 1500, p);
     else if (name === 'lastlap') flash('FINAL LAP!', 1500, p);
     else if (name === 'laptime') onLapTime(p, +value);
@@ -753,6 +842,7 @@ var Module = {
     }
     buildMenu();
     setStatus('');
+    Hud.loadImages().catch((e) => console.warn('hud', e));
     if (params.get('room')) {  // invite link
       $('net-code').value = params.get('room').toUpperCase();
       setMode('online');
