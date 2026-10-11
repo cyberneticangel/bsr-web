@@ -1,5 +1,6 @@
 #include "render.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -86,6 +87,40 @@ out vec4 o;
 void main() { o = vec4(u_col, 1.0); }
 )";
 
+static const char* kSpriteVS = R"(#version 300 es
+layout(location=0) in vec3 a_pos;
+layout(location=1) in vec2 a_uv;
+layout(location=2) in vec4 a_col;
+uniform mat4 u_vp;
+out vec2 v_uv;
+out vec4 v_col;
+out vec3 v_wpos;
+void main() {
+  v_uv = a_uv;
+  v_col = a_col;
+  v_wpos = a_pos;
+  gl_Position = u_vp * vec4(a_pos, 1.0);
+}
+)";
+
+static const char* kSpriteFS = R"(#version 300 es
+precision mediump float;
+in vec2 v_uv;
+in vec4 v_col;
+in vec3 v_wpos;
+uniform sampler2D u_tex;
+uniform vec3 u_eye, u_fog;
+uniform vec2 u_fogRange;
+out vec4 o_col;
+void main() {
+  vec4 c = texture(u_tex, v_uv) * v_col;
+  float f = clamp((length(v_wpos - u_eye) - u_fogRange.x) / (u_fogRange.y - u_fogRange.x), 0.0, 1.0);
+  c.rgb = mix(c.rgb, u_fog, f * 0.85);
+  if (c.a < 0.004) discard;
+  o_col = c;
+}
+)";
+
 static GLuint compile(GLenum type, const char* src) {
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, nullptr);
@@ -137,6 +172,25 @@ bool Renderer::init() {
     uTex1_ = glGetUniformLocation(prog_, "u_tex1");
     uAlphaMul_ = glGetUniformLocation(prog_, "u_alpha");
     uTint_ = glGetUniformLocation(prog_, "u_tint");
+    spriteProg_ = link(kSpriteVS, kSpriteFS);
+    sVP_ = glGetUniformLocation(spriteProg_, "u_vp");
+    sEye_ = glGetUniformLocation(spriteProg_, "u_eye");
+    sFog_ = glGetUniformLocation(spriteProg_, "u_fog");
+    sFogRange_ = glGetUniformLocation(spriteProg_, "u_fogRange");
+    sTex_ = glGetUniformLocation(spriteProg_, "u_tex");
+    glGenVertexArrays(1, &spriteVao_);
+    glGenBuffers(1, &spriteVbo_);
+    glGenBuffers(1, &spriteIbo_);
+    glBindVertexArray(spriteVao_);
+    glBindBuffer(GL_ARRAY_BUFFER, spriteVbo_);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(SpriteVtx), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(SpriteVtx), (void*)12);
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(SpriteVtx), (void*)20);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, spriteIbo_);
+    glBindVertexArray(0);
     lineProg_ = link(kLineVS, kLineFS);
     lMVP_ = glGetUniformLocation(lineProg_, "u_mvp");
     lCol_ = glGetUniformLocation(lineProg_, "u_col");
@@ -274,7 +328,9 @@ void Renderer::buildModel(const FSO& fso, const std::string& texDir, Model& out,
                     b.tex0 = texture(t0, texDir);
                 }
                 if (mat->textures.size() > 1) {
-                    const std::string& t1 = mat->textures[1];
+                    std::string t1 = mat->textures[1];
+                    auto ov1 = texOverride.find(t1);  // weather swaps lightmaps (dry -> wet)
+                    if (ov1 != texOverride.end()) t1 = ov1->second;
                     b.tex1 = texture(t1, texDir);
                     if (contains(t1, "environment")) b.envmap = true;
                     else b.lightmap = true;
@@ -395,6 +451,45 @@ void Renderer::drawPart(const Part& p, const M4& world, Pass pass, float alphaMu
             glDisable(GL_POLYGON_OFFSET_FILL);
         }
     }
+    glBindVertexArray(0);
+}
+
+void Renderer::drawSprites(const std::vector<SpriteVtx>& v, const Texture& tex, bool decal) {
+    size_t quads = std::min<size_t>(v.size() / 4, 16383);  // 16-bit indices
+    if (!quads) return;
+    glBindVertexArray(spriteVao_);
+    if (quads > spriteQuadCap_) {  // index buffer for 0,1,2 0,2,3 per quad
+        spriteQuadCap_ = std::max<size_t>(quads, 1024);
+        std::vector<uint16_t> idx(spriteQuadCap_ * 6);
+        for (size_t q = 0; q < spriteQuadCap_; q++) {
+            uint16_t b = (uint16_t)(q * 4);
+            uint16_t* o = &idx[q * 6];
+            o[0] = b; o[1] = b + 1; o[2] = b + 2; o[3] = b; o[4] = b + 2; o[5] = b + 3;
+        }
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx.size() * 2, idx.data(), GL_STATIC_DRAW);
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, spriteVbo_);
+    glBufferData(GL_ARRAY_BUFFER, quads * 4 * sizeof(SpriteVtx), v.data(), GL_STREAM_DRAW);
+    glUseProgram(spriteProg_);
+    glUniformMatrix4fv(sVP_, 1, GL_FALSE, viewProj_.m);
+    glUniform3f(sEye_, eye_.x, eye_.y, eye_.z);
+    glUniform3f(sFog_, fog_[0], fog_[1], fog_[2]);
+    glUniform2f(sFogRange_, fogStart_, fogEnd_);
+    glUniform1i(sTex_, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tex.id ? tex.id : white_);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_CULL_FACE);
+    if (decal) {
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(-2, -4);
+    }
+    glDrawElements(GL_TRIANGLES, (GLsizei)(quads * 6), GL_UNSIGNED_SHORT, nullptr);
+    if (decal) glDisable(GL_POLYGON_OFFSET_FILL);
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
     glBindVertexArray(0);
 }
 

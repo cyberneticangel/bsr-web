@@ -232,7 +232,7 @@ void Car::step(float dt, const CollisionWorld& world) {
         w.contact = w.contact && h.t <= rayLen;
         if (!w.contact) {
             w.comp = std::max(w.comp - dt * 0.5f, -kTravel);
-            w.slip = 0;
+            w.slip = w.slide = 0;
             w.spin += fwdSpeed / w.radius * dt * 0.98f;
             continue;
         }
@@ -284,6 +284,9 @@ void Car::step(float dt, const CollisionWorld& world) {
         // rolling resistance
         Flong += -vlong * m * 0.12f / wheels.size();
         float tot = std::sqrt(Flat * Flat + Flong * Flong);
+        bool saturated = tot > maxF;
+        bool locking = saturated && ((brake > 0.5f && !reversing) || (handbrake && !w.front));
+        w.slide = clampf((std::fabs(vlat) - 0.6f + (locking ? std::fabs(vlong) * 0.7f : 0.0f)) / 2.2f, 0.0f, 1.0f);
         if (tot > maxF && tot > 1e-6f) {
             float s = maxF / tot;
             Flat *= s;

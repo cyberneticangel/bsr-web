@@ -33,6 +33,22 @@ let manifest = null;
 const loaded = new Set();
 const sel = { mode: 'single', track: 'baanbreker', cls: 'pro_std', skin: 0, skin2: 1, raceType: 'cup', lenMode: 'laps', ghost: 1 };
 const RACE_MINUTES = [1, 2, 3, 5, 10, 20];
+// Menu weather, as in the original. Each track's <track>_weather_<cat>.bin lists the presets a category picks from.
+const WEATHER_CATS = { sunny: 'Sunny', cloudy: 'Cloudy', sunset: 'Sunset', wet: 'Wet', rain: 'Rain', random: 'Random' };
+
+// Resolves the menu choice into { cat, preset } for a track (random category, then a preset by the track's weights).
+function pickWeather(track, choice) {
+  const cats = (manifest.weather || {})[track] || {};
+  if (choice && !cats[choice] && choice !== 'random') return { cat: '', preset: choice };  // a preset name
+  const names = Object.keys(cats);
+  if (!names.length) return { cat: '', preset: 'sunny_bluesky_summer' };
+  const cat = cats[choice] ? choice : names[Math.floor(Math.random() * names.length)];
+  const { presets, weights } = cats[cat];
+  const total = weights.reduce((a, b) => a + Math.max(b, 0), 0);
+  let x = Math.random() * total, i = 0;
+  while (i < presets.length - 1 && (x -= Math.max(weights[i], 0)) > 0) i++;
+  return { cat, preset: presets[i] };
+}
 let lastRace = null;
 let race = null;  // current race: { opts, count, local, names, finished }
 const hudStates = [{}, {}];
@@ -131,6 +147,29 @@ const Audio = {
     this.cars = [];
     stop(this.crowd);
     this.crowd = null;
+    stop(this.rain);
+    this.rain = null;
+    clearTimeout(this.thunderTimer);
+  },
+  // Rain loop, and for thunder presets (..._T) thunder at random intervals with a lightning flash.
+  weather(preset, cat) {
+    const p = String(preset).toLowerCase();
+    const rain = cat === 'rain' || /_r_/.test(p) || p.startsWith('rain');
+    if (!this.ctx || !rain) return;
+    const heavy = /dens|bad|pouring/.test(p);
+    this.rain = this.loop(heavy ? 'FX_weather_rain_heavy' : 'FX_weather_rain_steady_A', heavy ? 0.4 : 0.3);
+    if (this.crowd) this.crowd.g.gain.value = 0.06;
+    if (!p.endsWith('_t')) return;
+    const strike = () => {
+      if (!race) return;
+      const near = Math.random() < 0.35;
+      if (near) lightning();
+      setTimeout(() => this.play(near ? (Math.random() < 0.5 ? 'FX_weather_thunder_close_A' : 'FX_weather_thunder_nearby')
+        : (Math.random() < 0.5 ? 'FX_weather_thunder_far_A' : 'FX_weather_thunder_very_far_A'), near ? 0.8 : 0.5),
+      near ? 150 : 0);
+      this.thunderTimer = setTimeout(strike, 9000 + Math.random() * 22000);
+    };
+    this.thunderTimer = setTimeout(strike, 4000 + Math.random() * 8000);
   },
   // Called every frame. The loops are smoothed here and written to .value: scheduling a setTargetAtTime per frame
   // grows the AudioParam event timeline, which some engines (Firefox) don't prune during a long race.
@@ -263,6 +302,14 @@ const Records = {
   },
 };
 
+// A lightning flash over the whole screen.
+function lightning() {
+  const el = $('flash');
+  el.classList.remove('on');
+  void el.offsetWidth;  // restart the animation
+  el.classList.add('on');
+}
+
 // ------------------------------------------------------------------ data loading
 async function fetchFiles(list, onProgress) {
   const todo = list.filter((f) => !loaded.has(f));
@@ -311,9 +358,9 @@ function buildMenu() {
   cls.value = sel.cls;
   const wx = $('weather');
   wx.innerHTML = '';
-  for (const [label, preset] of Object.entries(manifest.weather || {})) {
+  for (const [v, label] of Object.entries(WEATHER_CATS)) {
     const o = document.createElement('option');
-    o.value = preset;
+    o.value = v;
     o.textContent = label;
     wx.appendChild(o);
   }
@@ -499,7 +546,7 @@ function raceConfig(opts) {
     const c = manifest.classes[r.cls] || manifest.classes[opts.cls];
     return [r.cls, c.skins[r.skin % c.skins.length], c.topSpeed || 50, r.role].join(',');
   }).join('|');
-  return [`track=${opts.track}`, `weather=${opts.weather || 'sunny_bluesky_summer'}`, `laps=${opts.laps || 3}`, `time=${(opts.minutes || 0) * 60}`,
+  return [`track=${opts.track}`, `weather=${opts.weather || 'sunny_bluesky_summer'}`, `wxcat=${opts.weatherCat || ''}`, `laps=${opts.laps || 3}`, `time=${(opts.minutes || 0) * 60}`,
     `practice=${opts.practice ? 1 : 0}`, `ghost=${opts.practice ? opts.ghost || 0 : 0}`, `cars=${cars}`].join(';');
 }
 
@@ -516,13 +563,18 @@ function pickSong() {
 //       or without racers: { ..., skin, skin2?, split?, opponents } and the grid is made here.
 async function startRace(opts) {
   if (!opts.racers) opts = { ...opts, racers: localLineup(opts) };
+  if (!opts.weatherCat) {  // menu choice -> concrete preset (online, the host resolves it for everyone)
+    const w = pickWeather(opts.track, opts.weather);
+    opts = { ...opts, weather: w.preset, weatherCat: w.cat };
+  }
   Audio.init();
   if (Audio.ctx && Audio.ctx.state === 'suspended') Audio.ctx.resume();
   $('go').disabled = true;
   let ok = 0;
   try {
     const song = opts.song || pickSong();
-    const files = [...manifest.common, ...manifest.tracks[opts.track], ...Object.values(manifest.sounds)];
+    const wxFiles = ((manifest.weather[opts.track] || {})[opts.weatherCat] || {}).files || [];
+    const files = [...manifest.common, ...manifest.tracks[opts.track], ...wxFiles, ...Object.values(manifest.sounds)];
     if (song && Settings.musicMode !== 'off') files.push(Settings.musicMode === 'localized' ? song.wav : song.mp3);
     setStatus('Loading…', 0);
     await fetchFiles(files, (d, n) => setStatus(`Loading ${manifest.trackNames[opts.track]}… ${d}/${n}`, d / n));
@@ -547,6 +599,7 @@ async function startRace(opts) {
       : '↑↓←→ drive · Space handbrake · C camera · R reset' + (opts.online ? ' · Esc menu' : ' · P pause');
     $('canvas').focus();
     Audio.startRace(opts.cls, race.local);
+    Audio.weather(opts.weather, opts.weatherCat);
     if (song && Settings.musicMode === 'localized')
       Audio.playLocalized(song.wav, JSON.parse(Module.ccall('bsr_speakers', 'string', [], [])));
     else if (song) Audio.playMusic(song.mp3);
@@ -841,7 +894,7 @@ const Net = {
     if (sel.raceType === 'cup' && manifest.classes[m.cls] && sel.cls !== m.cls) { sel.cls = m.cls; sel.skin = 0; this.sendProfile(); }
     $('cls').value = sel.cls;
     if (RACE_MINUTES.includes(m.minutes)) $('minutes').value = m.minutes;
-    $('weather').value = m.weather;
+    if (WEATHER_CATS[m.weather]) $('weather').value = m.weather;
     $('opp').value = m.opponents;
     $('laps').value = m.laps;
     $('laps-v').textContent = m.laps;
@@ -886,7 +939,8 @@ const Net = {
     }
     const msg = {
       t: 'race', race: 1 + Math.floor(Math.random() * 0xfffffe),  // exact as a float32: tags state packets
-      track: sel.track, cls: sel.cls, weather: $('weather').value, lineup, song: pickSong(), ...raceLength(),
+      track: sel.track, cls: sel.cls, lineup, song: pickSong(), ...raceLength(),
+      ...(({ cat, preset }) => ({ weather: preset, weatherCat: cat }))(pickWeather(sel.track, $('weather').value)),
     };
     this.send(msg);
     this.joinRace({ ...msg, from: this.id });
@@ -897,7 +951,8 @@ const Net = {
     if (race) stopRace();
     const roles = m.lineup.map((e) => (e.peer === this.id ? '0' : !e.peer && this.isHost() ? 'a' : 'r'));
     const opts = {
-      online: true, raceId: m.race, track: m.track, cls: m.cls, weather: m.weather, laps: m.laps, minutes: m.minutes | 0,
+      online: true, raceId: m.race, track: m.track, cls: m.cls, weather: m.weather, weatherCat: m.weatherCat || '-',
+      laps: m.laps, minutes: m.minutes | 0,
       song: m.song,
       racers: m.lineup.map((e, i) => ({ role: roles[i], cls: manifest.classes[e.cls] ? e.cls : m.cls, skin: e.skin,
         name: e.peer === this.id ? 'You' : e.name })),

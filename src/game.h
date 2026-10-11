@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "effects.h"
 #include "formats.h"
 #include "netsync.h"
 #include "physics.h"
@@ -34,7 +35,8 @@ struct CarEntry {
 };
 
 struct RaceConfig {
-    std::string track, weather = "sunny_bluesky_summer";
+    std::string track, weather = "sunny_bluesky_summer";  // weather.bin preset
+    std::string weatherCat;      // menu category (sunny, cloudy, sunset, wet, rain): the track's texture swaps
     std::vector<CarEntry> cars;  // grid order: cars[0] starts at the back
     int laps = 3;                // lap race (ignored when seconds > 0)
     float seconds = 0;           // timed race: once time is up, each car finishes at its next line crossing
@@ -77,7 +79,10 @@ public:
     bool waiting = false;    // grid is set but the countdown is held (online: waiting for every player to load)
     bool autopilot = false;  // player car driven by AI (tests / after finishing)
     bool debugLines = false;
+    Effects& effects() { return fx_; }
     State state() const { return state_; }
+    bool raining() const { return rain_; }
+    bool wet() const { return wet_; }
     int localPlayers() const { return (int)players_.size(); }
     float raceTime() const { return raceTime_; }
     const std::vector<Racer>& racers() const { return racers_; }
@@ -117,7 +122,10 @@ private:
     CarModel* carModel(const std::string& cls, const std::string& skin);
 
     Renderer gfx_;
+    Effects fx_;
+    V3 camEye_, camRight_, camUp_;  // the view being drawn
     std::string trackName_, weatherName_;
+    bool rain_ = false, wet_ = false, thunder_ = false;
     FSO trackFso_;
     Model track_;
     FST fst_;

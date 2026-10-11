@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -28,8 +29,13 @@ SOUNDS = ['FX_Engine_st_22_ZENOAH_A', 'FX_Engine_st_22_serpent_A', 'FX_tire_slip
           'FX_weather_rain_light', 'FX_weather_thunder_close_A', 'FX_weather_thunder_far_A',
           'FX_weather_thunder_very_far_A', 'FX_weather_thunder_nearby']
 SOUND_PREFIXES = ['FX_Comment_']  # every announcer line (three voices: IJB, MW, PS)
-WEATHER = {'Sunny': 'sunny_bluesky_summer', 'Summer haze': 'sunny_neut_clouds_summer', 'Sunset': 'sunset_orange',
-           'Cloudy': 'cloudy_partly_NW_NR_NT', 'Foggy': 'cloudy_gray_foggy_NW_NR_NT', 'Wet': 'wet_neutral_A'}
+# Menu weather categories (as in the original); Tracks/<track>_weather_<cat>.bin lists each one's presets.
+WEATHER_CATS = ['sunny', 'cloudy', 'sunset', 'wet', 'rain']
+# Particle textures: tire smoke per class, rain and spray.
+FX_TEXTURES = ['FX_tiresmoke_jun_std', 'FX_tiresmoke_jun_hop', 'FX_tiresmoke_trn_std', 'FX_tiresmoke_trn_hop',
+               'FX_tiresmoke_skl_std', 'FX_tiresmoke_skl_hop', 'FX_tiresmoke_exp_std', 'FX_tiresmoke_exp_hop',
+               'FX_tiresmoke_pro_std', 'FX_tiresmoke_pro_hop', 'FX_spray', 'FX_spray_rain', 'FX_spray_wet',
+               'FX_rain_J', 'FX_EngineSmoke_Std_A']
 # Data/Music.ini: music per game state, and three genres of on-track music. Every on-track song exists as
 # .fs3 (stereo MP3) and .fsw (mono 11 kHz WAV, for "localized" music played from the trackside speakers).
 MUSIC_STATES = {'menu': 'music_bsr_take3a', 'finish': 'music_bsr_take5', 'podium': '61 Track61',
@@ -117,6 +123,7 @@ def main(data, web):
                 used.update((rel, wav))
         music[genre] = songs
     manifest['music'] = music
+    manifest['weather'] = {}
     for t in TRACKS:
         files = set()
         for suf in ('_high.fso', '_high.fst', '_meta.fso', '.bin'):
@@ -124,6 +131,24 @@ def main(data, web):
             if rel in index:
                 files.add(rel)
         files |= fso_textures('tracks/%s_high.fso' % t, t)
+        cats = {}
+        for cat in WEATHER_CATS:
+            rel = 'tracks/%s_weather_%s.bin' % (t, cat)
+            if rel not in index:
+                continue
+            d = bsrfmt.xor(open(index[rel], 'rb').read())
+            name = lambda o: d[o:o + 32].split(b'\0')[0].decode('latin1')
+            nswap, npre = struct.unpack_from('<I', d, 8)[0], struct.unpack_from('<I', d, 0x2fc)[0]
+            # files: this weather's extra downloads (the .bin and the textures it swaps in)
+            wfiles = {rel}
+            for i in range(min(nswap, 10)):
+                wfiles.update(tex_files(name(0x14c + i * 32), t))
+            wfiles -= files
+            used.update(wfiles)
+            cats[cat] = {'presets': [name(0x300 + i * 32) for i in range(min(npre, 16))],
+                         'weights': [round(w, 4) for w in struct.unpack_from('<%df' % min(npre, 16), d, 0x500)],
+                         'files': sorted(wfiles)}
+        manifest['weather'][t] = cats
         manifest['tracks'][t] = sorted(files)
         used |= files
     # hud.ini: per class/track speedometer scale (km/h) -> used as top speed.
@@ -142,7 +167,8 @@ def main(data, web):
             to = wx[o + 676 + i * 64:o + 740 + i * 64].split(b'\0')[0].decode('latin1')
             if to:
                 common.update(tex_files(to, ''))
-    manifest['weather'] = WEATHER
+    for name in FX_TEXTURES:
+        common.update(tex_files(name, ''))
     manifest['common'] = sorted(common)
     used |= common
     total = 0

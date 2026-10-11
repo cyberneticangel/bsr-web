@@ -92,6 +92,17 @@ struct Weather {
     std::vector<std::pair<std::string, std::string>> replace;  // texture swaps, e.g. dome placeholder -> sky
 };
 bool loadWeather(const std::string& preset, Weather& out);
+
+// Tracks/<track>_weather_<category>.bin (1344 bytes, XOR): what a menu weather category (sunny, rain, sunset,
+// wet, cloudy) means on a track: lightmap/sky texture swaps (e.g. dry -> wet lightmaps) and the weather.bin
+// presets it picks from, with weights.
+struct TrackWeather {
+    int category = 0;  // 0 sunny, 1 rain, 2 sunset, 3 wet, 4 cloudy
+    std::vector<std::pair<std::string, std::string>> swaps;
+    std::vector<std::string> presets;
+    std::vector<float> weights;
+};
+bool loadTrackWeather(const std::string& track, const std::string& category, TrackWeather& out);
 std::vector<std::string> weatherPresets();
 
 }  // namespace bsr

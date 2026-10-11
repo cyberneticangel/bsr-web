@@ -17,6 +17,12 @@ struct Texture {
 
 enum class Pass { Opaque, Blend };
 
+// Particles, rain and skid marks: world-space quads built on the CPU every frame (4 vertices each).
+struct SpriteVtx {
+    float p[3], uv[2];
+    uint32_t rgba;  // bytes r, g, b, a
+};
+
 struct Batch {
     GLuint vao = 0;
     GLsizei first = 0, count = 0;
@@ -56,6 +62,10 @@ public:
     void setFog(float r, float g, float b, float start, float end) { fog_[0] = r; fog_[1] = g; fog_[2] = b; fogStart_ = start; fogEnd_ = end; }
     void setTint(float r, float g, float b) { tint_[0] = r; tint_[1] = g; tint_[2] = b; }
     void drawLines(const std::vector<float>& xyz, float r, float g, float b);
+    // Alpha-blended, fogged, depth-tested without depth writes. quads: 4 vertices each (a, b, c, d around).
+    // decal: pulled towards the camera so marks on the ground don't z-fight with it.
+    void drawSprites(const std::vector<SpriteVtx>& quads, const Texture& tex, bool decal = false);
+    Texture white() const { return Texture{white_, false}; }
     // Offscreen RGBA target (menu previews): begin binds it, end reads it back (rows bottom-up) and unbinds.
     void beginOffscreen(int w, int h);
     void endOffscreen(std::vector<uint8_t>& rgba);
@@ -66,6 +76,9 @@ private:
     GLuint prog_ = 0, lineProg_ = 0, lineVbo_ = 0, lineVao_ = 0, white_ = 0;
     GLint uTint_, uMVP_, uModel_, uEye_, uSun_, uAmbDiff_, uMatDiff_, uMatAmb_, uFlags_, uFog_, uFogRange_, uTex0_, uTex1_, uAlphaMul_;
     GLint lMVP_, lCol_;
+    GLuint spriteProg_ = 0, spriteVao_ = 0, spriteVbo_ = 0, spriteIbo_ = 0;
+    GLint sVP_, sEye_, sFog_, sFogRange_, sTex_;
+    size_t spriteQuadCap_ = 0;
     M4 viewProj_;
     V3 eye_, sunDir_{0.4f, -0.4f, 0.82f};
     float amb_ = 0.55f, diff_ = 0.6f;

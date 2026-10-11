@@ -51,6 +51,7 @@ struct Wheel {
     float comp = 0, spin = 0, steer = 0;
     bool contact = false;
     float slip = 0;
+    float slide = 0;   // 0..1: sliding sideways or locked under braking (tire smoke, skid marks)
     uint32_t surface = 0;
 };
 

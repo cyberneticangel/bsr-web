@@ -438,4 +438,25 @@ bool loadWeather(const std::string& preset, Weather& w) {
     return false;
 }
 
+// Layout: u32 1, u32 category, u32 swapCount; char from[10][32] @0x0c; char to[10][32] @0x14c;
+// (car shadow/spray map names @0x2bc/0x2dc); u32 presetCount @0x2fc; char preset[16][32] @0x300;
+// float weight[16] @0x500. Slots past the counts hold stale data.
+bool loadTrackWeather(const std::string& track, const std::string& category, TrackWeather& w) {
+    Bytes d;
+    if (!readFile("tracks/" + track + "_weather_" + category + ".bin", d) || d.size() < 0x540) return false;
+    xorDecrypt(d.data(), d.size());
+    w = TrackWeather();
+    w.category = (int)rd<uint32_t>(&d[4]);
+    uint32_t ns = std::min<uint32_t>(rd<uint32_t>(&d[8]), 10), np = std::min<uint32_t>(rd<uint32_t>(&d[0x2fc]), 16);
+    for (uint32_t i = 0; i < ns; i++) {
+        std::string from = baseName(fixedStr(&d[0x0c + i * 32], 32)), to = baseName(fixedStr(&d[0x14c + i * 32], 32));
+        if (!from.empty() && !to.empty() && from != to) w.swaps.push_back({from, to});
+    }
+    for (uint32_t i = 0; i < np; i++) {
+        w.presets.push_back(fixedStr(&d[0x300 + i * 32], 32));
+        w.weights.push_back(rd<float>(&d[0x500 + i * 4]));
+    }
+    return true;
+}
+
 }  // namespace bsr

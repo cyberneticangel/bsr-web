@@ -11,6 +11,9 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); o
   font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
 canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; outline: none; touch-action: none; }
 .hidden { display: none !important; }
+#flash { position: fixed; inset: 0; pointer-events: none; background: #eef3ff; opacity: 0; }
+#flash.on { animation: flash 0.6s ease-out; }
+@keyframes flash { 0% { opacity: 0.75; } 12% { opacity: 0.1; } 22% { opacity: 0.55; } 100% { opacity: 0; } }
 
 .panel { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(620px, calc(100vw - 32px));
   scrollbar-color: #3a404a transparent; scrollbar-width: thin;

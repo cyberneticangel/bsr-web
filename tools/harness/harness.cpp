@@ -3,6 +3,7 @@
 //
 // usage: harness <data dir> <track> <class> <out dir> <race seconds> [shot times...]
 //        options via env: CAM=0|1|2, OPP=n, LAPS=n, TOP=kmh, SKINS=a,b,c
+//        WEATHER=preset WXCAT=sunny|cloudy|sunset|wet|rain
 //        TIME=s (timed race), PRACTICE=1, GHOST=1|2, CLASSES=a,b (AI classes, open race)
 //        STOP_AT=s      the player brakes to a stop at s (e.g. to watch the ghost drive on)
 //        PREVIEW=skin,skin  render menu car previews of <class> and exit
@@ -140,6 +141,7 @@ int main(int argc, char** argv) {
     RaceConfig cfg;
     cfg.track = track;
     cfg.weather = wx;
+    cfg.weatherCat = getenv("WXCAT") ? getenv("WXCAT") : "";
     cfg.laps = laps;
     cfg.seconds = getenv("TIME") ? (float)atof(getenv("TIME")) : 0;
     cfg.practice = getenv("PRACTICE") != nullptr;

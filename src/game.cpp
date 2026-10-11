@@ -59,6 +59,7 @@ bool parseRaceConfig(const std::string& s, RaceConfig& c) {
         std::string k = kv.substr(0, eq), v = kv.substr(eq + 1);
         if (k == "track") c.track = v;
         else if (k == "weather") c.weather = v;
+        else if (k == "wxcat") c.weatherCat = v;
         else if (k == "laps") c.laps = atoi(v.c_str());
         else if (k == "time") c.seconds = (float)atof(v.c_str());
         else if (k == "practice") c.practice = v == "1";
@@ -110,13 +111,21 @@ Game::CarModel* Game::carModel(const std::string& cls, const std::string& skinIn
 bool Game::start(const RaceConfig& cfgIn) {
     stop();
     cfg_ = cfgIn;
-    const std::string t = lower(cfg_.track), weather = cfg_.weather;
-    if (t != trackName_ || lower(weather) != weatherName_) {
+    const std::string t = lower(cfg_.track), weather = cfg_.weather, wxKey = lower(weather + "|" + cfg_.weatherCat);
+    // Presets are named <kind>_..._<W|NW>_<R|NR>_<T|NT>: wet track, rain, thunder.
+    std::string wl = lower(weather), cat = lower(cfg_.weatherCat);
+    rain_ = cat == "rain" || wl.find("_r_") != std::string::npos || wl.rfind("rain", 0) == 0;
+    wet_ = rain_ || cat == "wet" || wl.rfind("wet", 0) == 0;
+    thunder_ = rain_ && wl.size() > 2 && wl.compare(wl.size() - 2, 2, "_t") == 0;
+    if (t != trackName_ || wxKey != weatherName_) {
         Weather wx;
         std::map<std::string, std::string> swaps;
         if (!loadWeather(weather, wx)) loadWeather("sunny_bluesky_summer", wx);
         for (auto& [from, to] : wx.replace) swaps[from] = to;
-        weatherName_ = lower(weather);
+        TrackWeather tw;  // e.g. rain: dry lightmaps -> wet ones, and a darker sky dome
+        if (!cat.empty() && loadTrackWeather(t, cat, tw))
+            for (auto& [from, to] : tw.swaps) swaps[from] = to;
+        weatherName_ = wxKey;
         gfx_.release(track_);
         trackFso_ = FSO();
         meta_ = TrackMeta();
@@ -160,6 +169,7 @@ bool Game::start(const RaceConfig& cfgIn) {
         spec.grip = cls.find("hop") != std::string::npos ? 1.35f : 1.2f;
         if (cls == "monster") { spec.grip = 1.1f; spec.mass = 12; }
         spec.steerMax = 0.5f;
+        if (wet_) spec.grip *= rain_ ? 0.85f : 0.9f;  // wet tarmac
         Racer r;
         r.cls = cls;
         int slot = n - 1 - i;  // cars[0] starts at the back of the grid
@@ -212,6 +222,9 @@ bool Game::start(const RaceConfig& cfgIn) {
         v.camMode = defaultCam_;
         players_.push_back(v);
     }
+    std::vector<std::string> classes;
+    for (const Racer& r : racers_) classes.push_back(r.cls);
+    fx_.reset(gfx_, rain_, wet_, classes);
     ghostModel_.reset();
     ghostCur_ = GhostLap();
     ghostVisible_ = false;
@@ -479,6 +492,7 @@ void Game::update(float dt, const Input* in, int numInputs) {
     }
     if (state_ != Countdown) updateRace(dt);
     if (cfg_.ghost) updateGhost(dt);
+    if (!players_.empty()) fx_.update(dt, racers_, world_, players_[0].camPos);
     bool allDone = true, anyLocal = false;
     for (auto& v : players_) {
         const Racer& r = racers_[v.racer];
@@ -516,6 +530,9 @@ void Game::updateCamera(View& v, float dt, int x, int y, int w, int h) {
         at = c.pos + V3(0, 0, 0.12f) + flatF * 0.3f;
     }
     M4 view = M4::lookAt(eye, at, V3(0, 0, 1));
+    camEye_ = eye;
+    camRight_ = V3(view.m[0], view.m[4], view.m[8]);
+    camUp_ = V3(view.m[1], view.m[5], view.m[9]);
     if (cb.listener && &v == &players_[0]) cb.listener(eye, norm(at - eye), V3(0, 0, 1));
     float aspect = (float)w / std::max(h, 1);
     float fovy = v.camMode == 2 ? 1.2f : 1.05f;
@@ -543,6 +560,7 @@ void Game::draw() {
         M4 body = racers_[i].car.bodyMatrix();
         for (Part* p : carModels_[i]->parts) gfx_.drawPart(*p, body, Pass::Blend);
     }
+    fx_.draw(gfx_, camEye_, camRight_, camUp_);
     if (ghostVisible_) {  // translucent, after everything else so the track shows through it
         M4 body = ghost_.car.bodyMatrix();
         for (Part* p : ghostModel_->parts) gfx_.drawPart(*p, body, Pass::Blend, 0.5f);
