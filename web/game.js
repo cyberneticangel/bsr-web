@@ -12,6 +12,20 @@ const params = new URLSearchParams(location.search);
 const $ = (id) => document.getElementById(id);
 const MAX_RACERS = 8;  // grid slots on every track
 
+// Player preferences, kept in this browser.
+const Settings = {
+  musicMode: 'stereo',  // stereo | localized (from the trackside speakers) | off
+  genres: { surf: true, rock: true, dance: true },
+  load() {
+    try { Object.assign(this, JSON.parse(localStorage.getItem('bsr-settings')) || {}); } catch (e) {}
+  },
+  save() {
+    const { musicMode, genres, hudScale, hudStyle } = this;
+    try { localStorage.setItem('bsr-settings', JSON.stringify({ musicMode, genres, hudScale, hudStyle })); } catch (e) {}
+  },
+};
+Settings.load();
+
 let manifest = null;
 const loaded = new Set();
 const sel = { mode: 'single', track: 'baanbreker', cls: 'pro_std', skin: 0, skin2: 1, raceType: 'cup', lenMode: 'laps', ghost: 1 };
@@ -20,6 +34,12 @@ let lastRace = null;
 let race = null;  // current race: { opts, count, local, names, finished }
 const hudStates = [{}, {}];
 let hudState = hudStates[0];
+
+// Sets an AudioParam triple (positionX/Y/Z) directly, or through the older setPosition().
+function setParam(node, name, x, y, z) {
+  if (node[name + 'X']) { node[name + 'X'].value = x; node[name + 'Y'].value = y; node[name + 'Z'].value = z; }
+  else if (name === 'position' && node.setPosition) node.setPosition(x, y, z);
+}
 
 function xorInPlace(u8, start = 0) {
   for (let i = start; i < u8.length; i++) u8[i] ^= KEY[(i - start) & 15];
@@ -30,7 +50,7 @@ function xorInPlace(u8, start = 0) {
 const Audio = {
   ctx: null, buffers: {}, cars: [], crowd: null, master: null, music: null, musicEl: null,
   lastImpact: [0, 0], enabled: true,
-  vol: { comments: 0.9 },
+  vol: { comments: 0.9, music: 0.45 },
   init() {
     if (this.ctx) return;
     try {
@@ -128,21 +148,76 @@ const Audio = {
       this.play(impact > 3 ? 'FX_auto_botst_c' : 'AU_FX_botst_alg_A', Math.min(1, impact / 5), 0.9 + Math.random() * 0.2);
     }
   },
-  playMusic(path) {
+  // Background music from an MP3 (.fs3 = MP3 XORed with the key), fetched on demand. One track plays at a time.
+  async playMusic(path, loop = true) {
     this.stopMusic();
-    if (!path || !$('music').checked) return;
+    if (!path || Settings.musicMode === 'off') return;
+    const token = this.musicToken = {};
     try {
-      const u8 = xorInPlace(Module.FS.readFile('/data/' + path).slice());  // .fs3 = MP3 XORed with the key
+      await fetchFiles([path], () => {});
+      if (token !== this.musicToken) return;  // something else started meanwhile
+      const u8 = xorInPlace(Module.FS.readFile('/data/' + path).slice());
       const url = URL.createObjectURL(new Blob([u8], { type: 'audio/mpeg' }));
       const el = new window.Audio(url);
-      el.loop = true;
-      el.volume = 0.45;
+      el.loop = loop;
+      el.volume = this.vol.music;
       el.play().catch(() => {});
       this.musicEl = el;
+      this.musicPath = path;
     } catch (e) {}
   },
+  // Localized music: the song's mono WAV played from the track's loudspeakers, positioned in 3D around the camera.
+  playLocalized(wavPath, speakers) {
+    this.stopMusic();
+    if (!this.ctx || !wavPath) return;
+    let buf = null;
+    try { buf = this.decodeFSW(Module.FS.readFile('/data/' + wavPath)); } catch (e) {}
+    if (!buf) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    const g = this.ctx.createGain();
+    g.gain.value = this.vol.music * 2.2;  // far away most of the time
+    src.connect(g);
+    const panners = speakers.map(([x, y, z]) => {
+      const pn = this.ctx.createPanner();
+      pn.panningModel = 'HRTF';
+      pn.distanceModel = 'inverse';
+      pn.refDistance = 6;
+      pn.rolloffFactor = 1;
+      setParam(pn, 'position', x, y, z);
+      g.connect(pn).connect(this.master);
+      return pn;
+    });
+    if (!panners.length) g.connect(this.master);  // no speakers on this track: plain mono
+    src.start();
+    this.localized = { src, g, panners };
+  },
+  setListener(x, y, z, fx, fy, fz) {
+    if (!this.ctx || !this.localized) return;
+    const l = this.ctx.listener;
+    setParam(l, 'position', x, y, z);
+    if (l.forwardX) {
+      l.forwardX.value = fx; l.forwardY.value = fy; l.forwardZ.value = fz;
+      l.upX.value = 0; l.upY.value = 0; l.upZ.value = 1;
+    } else if (l.setOrientation) {
+      l.setOrientation(fx, fy, fz, 0, 0, 1);
+    }
+  },
   stopMusic() {
+    this.musicToken = null;
     if (this.musicEl) { this.musicEl.pause(); URL.revokeObjectURL(this.musicEl.src); this.musicEl = null; }
+    this.musicPath = null;
+    if (this.localized) {
+      try { this.localized.src.stop(); } catch (e) {}
+      this.localized.g.disconnect();
+      this.localized = null;
+    }
+  },
+  // The menu theme (Music.ini "Menus"), also in the online lobby. Keeps playing if it already is.
+  menuMusic() {
+    if (!manifest || this.musicPath === manifest.music.menu) return;
+    this.playMusic(manifest.music.menu);
   },
 };
 
@@ -251,6 +326,17 @@ function buildMenu() {
   choice('racetype', 'raceType');
   choice('lenmode', 'lenMode');
   choice('ghost', 'ghost', Number);
+  for (const b of $('musicmode').children) b.onclick = () => {
+    Settings.musicMode = b.dataset.v;
+    Settings.save();
+    refreshSel();
+    if (Settings.musicMode === 'off') Audio.stopMusic(); else Audio.menuMusic();
+  };
+  for (const b of $('genres').children) b.onclick = () => {
+    Settings.genres[b.dataset.v] = !Settings.genres[b.dataset.v];
+    Settings.save();
+    refreshSel();
+  };
   refreshSel();
 }
 
@@ -282,6 +368,9 @@ function refreshSel() {
   $('minutes').classList.toggle('hidden', sel.lenMode !== 'time');
   for (const id of ['row-racetype', 'row-opp', 'row-length']) $(id).classList.toggle('hidden', practice);
   $('row-ghost').classList.toggle('hidden', !practice);
+  for (const b of $('musicmode').children) b.classList.toggle('sel', b.dataset.v === Settings.musicMode);
+  for (const b of $('genres').children) b.classList.toggle('sel', !!Settings.genres[b.dataset.v]);
+  $('row-genres').classList.toggle('hidden', Settings.musicMode === 'off');
   $('row-skin2').classList.toggle('hidden', !split);
   $('skin-label').textContent = split ? 'P1 skin' : 'Skin';
   $('opp-label').textContent = online ? 'AI cars' : 'Opponents';
@@ -323,6 +412,8 @@ function show(id) {
   $('hud').classList.toggle('split', split);
   $('touch').classList.toggle('hidden', !(racing && !split && ('ontouchstart' in window)));
   if (id !== 'results') clearInterval(showResults.timer);
+  if (id === 'menu') Audio.menuMusic();
+  if (id === 'results' && manifest) Audio.playMusic(manifest.music.finish);
   if (id === 'pause') {  // online the race can't be paused or restarted, only left
     const net = !!race && !!race.opts.online;
     $('pause-title').textContent = net ? 'RACE MENU' : 'PAUSED';
@@ -365,7 +456,9 @@ function raceConfig(opts) {
 
 // A random on-track song: { mp3, wav }.
 function pickSong() {
-  const songs = ['surf', 'rock', 'dance'].flatMap((g) => manifest.music[g] || []);
+  let genres = ['surf', 'rock', 'dance'].filter((g) => Settings.genres[g]);
+  if (!genres.length) genres = ['surf', 'rock', 'dance'];
+  const songs = genres.flatMap((g) => manifest.music[g] || []);
   return songs[Math.floor(Math.random() * songs.length)] || null;
 }
 
@@ -381,7 +474,7 @@ async function startRace(opts) {
   try {
     const song = opts.song || pickSong();
     const files = [...manifest.common, ...manifest.tracks[opts.track], ...Object.values(manifest.sounds)];
-    if (song) files.push(song.mp3);
+    if (song && Settings.musicMode !== 'off') files.push(Settings.musicMode === 'localized' ? song.wav : song.mp3);
     setStatus('Loading…', 0);
     await fetchFiles(files, (d, n) => setStatus(`Loading ${manifest.trackNames[opts.track]}… ${d}/${n}`, d / n));
     setStatus('Building track…');
@@ -405,8 +498,10 @@ async function startRace(opts) {
       : '↑↓←→ drive · Space handbrake · C camera · R reset' + (opts.online ? ' · Esc menu' : ' · P pause');
     $('canvas').focus();
     Audio.startRace(opts.cls, race.local);
-    Audio.stopMusic();
-    if (song) Audio.playMusic(song.mp3);
+    if (song && Settings.musicMode === 'localized')
+      Audio.playLocalized(song.wav, JSON.parse(Module.ccall('bsr_speakers', 'string', [], [])));
+    else if (song) Audio.playMusic(song.mp3);
+    else Audio.stopMusic();
     if (!opts.online) Announcer.say('racestart_in_3_seconds');
   } catch (e) {
     ok = 0;
@@ -506,6 +601,7 @@ var Module = {
     else if ($(pre + 'msg').textContent === 'Waiting for players…') $(pre + 'msg').textContent = '';
   },
   onAudio(rpm, thr, skid, impact, speed, p = 0) { Audio.update(rpm, thr, skid, impact, speed, p); },
+  onListener(x, y, z, fx, fy, fz) { Audio.setListener(x, y, z, fx, fy, fz); },
   onEvent(event) {
     const [name, ps, value] = event.split(':');
     const p = ps === undefined || ps === '' ? 0 : Math.max(0, +ps);
@@ -898,6 +994,17 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+// Browsers only start audio after a user gesture: unlock it on the first one and start the menu theme.
+for (const ev of ['pointerdown', 'keydown']) {
+  window.addEventListener(ev, function unlock() {
+    window.removeEventListener('pointerdown', unlock);
+    window.removeEventListener('keydown', unlock);
+    Audio.init();
+    if (Audio.ctx && Audio.ctx.state === 'suspended') Audio.ctx.resume();
+    if (inMenu()) Audio.menuMusic();
+  });
+}
+
 // Touch controls: steering pad + gas/brake buttons.
 (function touch() {
   const pad = $('t-steer'), knob = $('t-knob');
@@ -927,7 +1034,7 @@ document.addEventListener('visibilitychange', () => {
 async function autoTest() {
   const track = params.get('auto');
   const cls = params.get('cls') || 'pro_std';
-  $('music').checked = false;
+  Settings.musicMode = 'off';
   await startRace({ track, cls, skin: 0, opponents: +(params.get('opp') || 5), laps: 3 });
   const shots = (params.get('times') || '0.5,6,14').split(',').map(Number);
   if (params.get('drive')) Module.ccall('bsr_touch', null, ['number', 'number', 'number'], [0, 1, 0]);

@@ -126,6 +126,13 @@ bool Game::start(const RaceConfig& cfgIn) {
         if (!meta_.load(t)) { fprintf(stderr, "track meta failed\n"); return false; }
         gfx_.buildModel(trackFso_, t, track_, swaps);
         world_.build(fst_);
+        speakers_.clear();
+        for (const Part& p : track_.parts) {
+            std::string n = lower(p.name);
+            if (n.find("refl") == std::string::npos &&
+                (n.find("speakerrond") != std::string::npos || n.find("speakervierkant") != std::string::npos))
+                speakers_.push_back(p.local.point((p.bmin + p.bmax) * 0.5f));
+        }
         trackName_ = t;
         if (trackFso_.sun.valid) {
             const Vec3& d = trackFso_.sun.dir;
@@ -509,6 +516,7 @@ void Game::updateCamera(View& v, float dt, int x, int y, int w, int h) {
         at = c.pos + V3(0, 0, 0.12f) + flatF * 0.3f;
     }
     M4 view = M4::lookAt(eye, at, V3(0, 0, 1));
+    if (cb.listener && &v == &players_[0]) cb.listener(eye, norm(at - eye), V3(0, 0, 1));
     float aspect = (float)w / std::max(h, 1);
     float fovy = v.camMode == 2 ? 1.2f : 1.05f;
     // Split-screen views are very wide: cap the horizontal field of view instead of stretching it.

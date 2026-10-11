@@ -22,6 +22,8 @@ struct Callbacks {
     // player: local player index (split-screen). Per-player events are named "<event>:<player>[:<value>]".
     void (*audio)(int player, float rpm, float throttle, float skid, float impact, float speed) = nullptr;
     void (*event)(const char* name) = nullptr;
+    // Once per rendered frame: player 0's camera (positional audio). eye, forward and up, world space.
+    void (*listener)(const V3& eye, const V3& fwd, const V3& up) = nullptr;
 };
 
 struct CarEntry {
@@ -79,6 +81,8 @@ public:
     const std::vector<Racer>& racers() const { return racers_; }
     const TrackMeta& meta() const { return meta_; }
     const CollisionWorld& world() const { return world_; }
+    // Trackside loudspeakers (centres of the track's speaker models), for localized music.
+    const std::vector<V3>& speakers() const { return speakers_; }
     // Diagnostics: lowest height of the drawn body's bottom corners (body) and wheel bottoms (wheel) above the
     // ground right under them; negative = drawn inside the ground.
     void clearance(int racer, float& body, float& wheel) const;
@@ -122,6 +126,7 @@ private:
     std::vector<SnapshotBuffer> snaps_;  // per racer; used by remote racers only
     std::vector<View> players_;          // local human players, in player order
     RaceConfig cfg_;
+    std::vector<V3> speakers_;
     std::map<std::string, FSO> carFsos_;  // per class, for this race
     int laps_ = 3;
     bool timeUp_ = false;

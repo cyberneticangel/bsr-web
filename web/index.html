@@ -85,7 +85,10 @@
   </div>
   <div class="row hidden" id="row-ghost"><label>Ghost</label><div id="ghost" class="choices">
     <button data-v="0">Off</button><button data-v="1">Best lap</button><button data-v="2">Last lap</button></div></div>
-  <div class="row"><label>Music</label><input id="music" type="checkbox" checked></div>
+  <div class="row"><label>Music</label><div id="musicmode" class="choices">
+    <button data-v="stereo" title="Normal music">Stereo</button><button data-v="localized" title="Played by the loudspeakers around the track">Localized</button><button data-v="off">Off</button></div></div>
+  <div class="row" id="row-genres"><label>Genres</label><div id="genres" class="choices">
+    <button data-v="surf">50's surf</button><button data-v="rock">Rock</button><button data-v="dance">Dance</button></div></div>
   <button id="go" class="big">RACE</button>
   <div id="status"></div>
 </div>

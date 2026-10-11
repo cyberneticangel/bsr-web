@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -16,6 +17,8 @@ EM_JS(void, js_hud, (int player, const char* json), { if (Module.onHud) Module.o
 EM_JS(void, js_audio, (int player, float rpm, float throttle, float skid, float impact, float speed),
       { if (Module.onAudio) Module.onAudio(rpm, throttle, skid, impact, speed, player); });
 EM_JS(void, js_event, (const char* name), { if (Module.onEvent) Module.onEvent(UTF8ToString(name)); });
+EM_JS(void, js_listener, (float x, float y, float z, float fx, float fy, float fz),
+      { if (Module.onListener) Module.onListener(x, y, z, fx, fy, fz); });
 
 namespace {
 
@@ -178,6 +181,7 @@ EMSCRIPTEN_KEEPALIVE int bsr_init() {
     game.init();
     game.cb.audio = js_audio;
     game.cb.event = js_event;
+    game.cb.listener = [](const V3& e, const V3& f, const V3&) { js_listener(e.x, e.y, e.z, f.x, f.y, f.z); };
     emscripten_set_keydown_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, true, onKey);
     emscripten_set_keyup_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, true, onKey);
     lastT = emscripten_get_now() / 1000.0;
@@ -225,6 +229,19 @@ EMSCRIPTEN_KEEPALIVE void bsr_put_state(int racer, const float* snap) {
     game.pushSnapshot(racer, snap, emscripten_get_now() / 1000.0);
 }
 EMSCRIPTEN_KEEPALIVE void bsr_remove_racer(int racer) { game.removeRacer(racer); }
+
+// Trackside speaker positions as JSON [[x,y,z],...] (valid once a race has started on the track).
+EMSCRIPTEN_KEEPALIVE const char* bsr_speakers() {
+    static std::string out;
+    out = "[";
+    for (const V3& p : game.speakers()) {
+        char b[96];
+        snprintf(b, sizeof b, "%s[%.2f,%.2f,%.2f]", out.size() > 1 ? "," : "", p.x, p.y, p.z);
+        out += b;
+    }
+    out += "]";
+    return out.c_str();
+}
 
 }  // extern "C"
 

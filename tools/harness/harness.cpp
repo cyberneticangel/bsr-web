@@ -146,6 +146,7 @@ int main(int argc, char** argv) {
                             i == 0 ? '0' : 'a'});
     }
     if (!game.start(cfg)) { fprintf(stderr, "start failed\n"); return 1; }
+    fprintf(stderr, "speakers: %zu\n", game.speakers().size());
 
     const float dt = 1.0f / 60.0f;
     size_t nextShot = 0;
