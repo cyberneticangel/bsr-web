@@ -117,6 +117,20 @@ button.big { display: block; width: 100%; margin: 18px 0 8px; padding: 12px; fon
 #board-table tr.me td { color: var(--accent); font-weight: bold; }
 #board-table tr.lobby td { color: var(--muted); }
 #board-table .ping { display: flex; align-items: center; gap: 6px; }
+/* Championship */
+.cups button { display: flex; flex-direction: column; align-items: flex-start; min-width: 132px; text-align: left; }
+.cups button small { color: var(--muted); font-size: 11px; }
+.cups button.sel small { color: var(--accent-ink); }
+.medal { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+.medal.gold { background: #f5c518; } .medal.silver { background: #c9ced6; } .medal.bronze { background: #c4783a; }
+.table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 14px; margin-bottom: 8px; }
+.table td, .table th { padding: 5px 8px; border-bottom: 1px solid #2a2f38; text-align: left; }
+.table th { color: var(--muted); font-weight: normal; font-size: 12px; text-transform: uppercase; }
+.table tr.me td { color: var(--accent); font-weight: bold; }
+.table td.num, .table th.num { text-align: right; }
+.champ-btns button { flex: 1; }
+#champ h2 { margin: 8px 0 4px; }
+
 #res-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 #res-table td, #res-table th { padding: 6px 8px; border-bottom: 1px solid #2a2f38; text-align: left; }
 #res-table tr.me td { color: var(--accent); font-weight: bold; }

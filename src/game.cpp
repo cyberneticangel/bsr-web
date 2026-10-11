@@ -69,7 +69,7 @@ bool parseRaceConfig(const std::string& s, RaceConfig& c) {
             for (const std::string& car : split(v, '|')) {
                 std::vector<std::string> f = split(car, ',');
                 if (f.size() < 4 || f[0].empty() || f[3].empty()) continue;
-                c.cars.push_back({f[0], f[1], (float)atof(f[2].c_str()), f[3][0]});
+                c.cars.push_back({f[0], f[1], (float)atof(f[2].c_str()), f[3][0], f.size() > 4 ? (float)atof(f[4].c_str()) : 0});
             }
         }
     }
@@ -201,7 +201,7 @@ bool Game::start(const RaceConfig& cfgIn) {
         r.remote = role == 'r';
         r.ai = r.player < 0 && !r.remote;
         r.aiLine = i % std::min<size_t>(5, meta_.aiLines.size());  // aii06 is an alternate (pit) line
-        r.aiSkill = !r.ai ? 1.0f : 0.86f + 0.1f * (float)((i * 7) % 5) / 4.0f;
+        r.aiSkill = !r.ai ? 1.0f : e.skill > 0 ? clampf(e.skill, 0.5f, 1.0f) : 0.86f + 0.1f * (float)((i * 7) % 5) / 4.0f;
         r.car.setup(wc, wr, sph, spec);
         const GridSlot& gs = meta_.grid[slot];
         r.car.place(gs.pos, gs.heading, world_);

@@ -32,6 +32,7 @@ struct CarEntry {
     std::string skin;         // body texture
     float topSpeedKmh = 50;
     char role = 'a';          // '0'/'1' local human player, 'a' AI simulated here, 'r' remote (network snapshots)
+    float skill = 0;          // AI pace 0..1 (0: by grid slot)
 };
 
 struct RaceConfig {
@@ -43,7 +44,7 @@ struct RaceConfig {
     bool practice = false;       // no finish: laps run until the player quits
     int ghost = 0;               // ghost car replaying the player's 1 best lap, 2 last lap (0 off)
 };
-// Parses "track=mach;weather=...;laps=3;time=0;practice=0;ghost=0;cars=cls,skin,top,role|cls,skin,top,role|..."
+// Parses "track=mach;weather=...;laps=3;time=0;practice=0;ghost=0;cars=cls,skin,top,role[,skill]|..."
 bool parseRaceConfig(const std::string& s, RaceConfig& out);
 
 class Game {

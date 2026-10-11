@@ -386,6 +386,102 @@ function lightning() {
   el.classList.add('on');
 }
 
+// ------------------------------------------------------------------ championship
+// The original's championships (Languages: menu_choosechamp_entry1..11): a cup per class, in this order,
+// then the open BSR championship. A season is six races, one per track; finishing in the top three (gold,
+// silver or bronze cup) unlocks the next championship.
+const CUPS = [
+  ...['junior_std', 'skilled_std', 'trained_std', 'expert_std', 'pro_std', 'junior_hop', 'skilled_hop', 'trained_hop',
+    'expert_hop', 'pro_hop'].map((c) => ({ id: c, cls: c, name: c.replace('pro_', 'prof_').replace(/^\w/, (x) => x.toUpperCase())
+    .replace(/_(std|hop)$/, (_, k) => ' ' + k.toUpperCase() + ' Cup') })),
+  { id: 'bsr', cls: null, name: 'BSR Championship', open: true },
+];
+const CHAMP_TRACKS = ['real80', 'velodrome', 'de_sluis', 'mach', 'baanbreker', 'evmc'];
+const POINTS = [10, 8, 6, 5, 4, 3, 2, 1];  // by finishing place, plus one for the winner
+const AI_DRIVERS = ['Bram', 'Lotte', 'Jesper', 'Femke', 'Ruben', 'Sanne', 'Thijs', 'Noor', 'Daan', 'Iris', 'Joost', 'Mila'];
+const MEDALS = ['gold', 'silver', 'bronze'];
+
+const Champ = {
+  key: 'bsr-champ',
+  data: { unlocked: 1, medals: {}, active: null },
+  pick: 0,  // cup selected in the menu
+  load() {
+    try { Object.assign(this.data, JSON.parse(localStorage.getItem(this.key)) || {}); } catch (e) {}
+  },
+  save() { try { localStorage.setItem(this.key, JSON.stringify(this.data)); } catch (e) {} },
+  get active() { return this.data.active; },
+  unlocked(i) { return i < this.data.unlocked; },
+
+  start(cupIdx, cls, skin) {
+    const cup = CUPS[cupIdx];
+    const names = [...AI_DRIVERS].sort(() => Math.random() - 0.5).slice(0, MAX_RACERS - 1);
+    const nSkins = manifest.classes[cls].skins.length;
+    const skins = [...Array(nSkins).keys()].filter((k) => k !== skin).sort(() => Math.random() - 0.5);
+    const drivers = [{ name: Net.name() === 'Player' ? 'You' : Net.name(), me: true, cls, skin, pts: 0 }];
+    names.forEach((name, k) => {
+      const c = cup.open ? randomClass(cls) : cls;
+      drivers.push({ name, cls: c, skin: c === cls ? skins[k % skins.length] : Math.floor(Math.random() * 12),
+        skill: +(0.86 + 0.11 * k / (names.length - 1)).toFixed(3), pts: 0 });
+    });
+    this.data.active = { cup: cupIdx, cls, round: 0, season: 1, drivers, results: [] };
+    this.save();
+  },
+  standings() {
+    return [...this.active.drivers].sort((a, b) => b.pts - a.pts || (a.me ? -1 : b.me ? 1 : 0));
+  },
+  // The next race: the championship leader starts at the back (cars[0]).
+  raceOpts() {
+    const a = this.active;
+    const grid = this.standings();
+    return {
+      champ: true, track: CHAMP_TRACKS[a.round % CHAMP_TRACKS.length], cls: a.cls, laps: 3, minutes: 0, weather: 'random',
+      racers: grid.map((d) => ({ role: d.me ? '0' : 'a', cls: d.cls, skin: d.skin, name: d.name, skill: d.skill,
+        driver: a.drivers.indexOf(d) })),
+    };
+  },
+  // Scores a finished race (results from bsr_results; racers: the race's grid). Returns points per driver.
+  record(res, racers) {
+    const a = this.active;
+    const got = {};
+    res.forEach((r) => {
+      const d = racers[r.i] && racers[r.i].driver;
+      if (d === undefined || !a.drivers[d]) return;
+      const pts = (POINTS[r.place - 1] || 0) + (r.place === 1 ? 1 : 0);
+      a.drivers[d].pts += pts;
+      got[d] = pts;
+    });
+    a.results.push({ track: CHAMP_TRACKS[a.round % CHAMP_TRACKS.length], got });
+    a.round++;
+    this.save();
+    return got;
+  },
+  // Skipping a race: you finish last (one point); the others in order of their pace, with some luck.
+  skip() {
+    const opts = this.raceOpts();
+    const ai = opts.racers.map((r, i) => ({ r, i })).filter((x) => x.r.role !== '0')
+      .sort((x, y) => (y.r.skill + Math.random() * 0.08) - (x.r.skill + Math.random() * 0.08));
+    const res = ai.map((x, k) => ({ i: x.i, place: k + 1 }));
+    const me = opts.racers.findIndex((r) => r.role === '0');
+    res.push({ i: me, place: opts.racers.length });  // last of eight: one point
+    this.record(res, opts.racers);
+  },
+  over() { return this.active && this.active.round >= CHAMP_TRACKS.length; },
+  // End of the season: a cup for the top three, which unlocks the next championship.
+  finish() {
+    const a = this.active;
+    const place = this.standings().findIndex((d) => d.me) + 1;
+    const medal = MEDALS[place - 1] || null;
+    const best = this.data.medals[CUPS[a.cup].id];
+    if (medal && (!best || MEDALS.indexOf(medal) < MEDALS.indexOf(best))) this.data.medals[CUPS[a.cup].id] = medal;
+    if (medal) this.data.unlocked = Math.max(this.data.unlocked, Math.min(CUPS.length, a.cup + 2));
+    this.data.active = null;
+    this.save();
+    return { place, medal, cup: CUPS[a.cup] };
+  },
+  abandon() { this.data.active = null; this.save(); },
+};
+Champ.load();
+
 // ------------------------------------------------------------------ data loading
 async function fetchFiles(list, onProgress) {
   const todo = list.filter((f) => !loaded.has(f));
@@ -533,6 +629,10 @@ function skinButtons(container, current, onPick) {
 }
 
 function refreshSel() {
+  if (sel.mode === 'champ' && !Champ.active && CUPS[Champ.pick].cls) {  // a cup races its own class
+    sel.cls = CUPS[Champ.pick].cls;
+    $('cls').value = sel.cls;
+  }
   for (const b of $('tracks').children) b.classList.toggle('sel', b.dataset.v === sel.track);
   for (const b of $('modes').children) b.classList.toggle('sel', b.dataset.v === sel.mode);
   const nSkins = manifest.classes[sel.cls].skins.length;
@@ -546,7 +646,13 @@ function refreshSel() {
   for (const b of $('ghost').children) b.classList.toggle('sel', +b.dataset.v === sel.ghost);
   $('len-laps').classList.toggle('hidden', sel.lenMode !== 'laps');
   $('minutes').classList.toggle('hidden', sel.lenMode !== 'time');
-  for (const id of ['row-racetype', 'row-opp', 'row-length']) $(id).classList.toggle('hidden', practice);
+  const champ = sel.mode === 'champ';
+  $('row-cls').classList.remove('hidden');
+  $('row-skin').classList.remove('hidden');
+  for (const id of ['row-racetype', 'row-opp', 'row-length']) $(id).classList.toggle('hidden', practice || champ);
+  for (const id of ['row-track', 'row-weather']) $(id).classList.toggle('hidden', champ);
+  $('champ').classList.toggle('hidden', !champ);
+  if (champ) renderChamp();
   $('row-ghost').classList.toggle('hidden', !practice);
   for (const b of $('musicmode').children) b.classList.toggle('sel', b.dataset.v === Settings.musicMode);
   for (const b of $('genres').children) b.classList.toggle('sel', !!Settings.genres[b.dataset.v]);
@@ -565,7 +671,8 @@ function refreshSel() {
   for (const id of ['weather', 'opp', 'laps', 'minutes']) $(id).disabled = guest;
   $('cls').disabled = guest && sel.raceType !== 'open';  // open races: everyone brings their own class
   const go = $('go');
-  if (!online) { go.textContent = 'RACE'; go.disabled = false; }
+  if (champ) { go.textContent = Champ.active ? 'START RACE' : 'START CHAMPIONSHIP'; go.disabled = !Champ.active && !Champ.unlocked(Champ.pick); }
+  else if (!online) { go.textContent = 'RACE'; go.disabled = false; }
   else if (!Net.connected()) { go.textContent = 'JOIN OR CREATE A ROOM'; go.disabled = true; }
   else if (guest) { go.textContent = 'WAITING FOR HOST'; go.disabled = true; }
   else { go.textContent = 'START RACE'; go.disabled = false; }
@@ -575,6 +682,52 @@ function refreshSel() {
 // { laps, minutes }: minutes > 0 is a timed race.
 function raceLength() {
   return sel.lenMode === 'time' ? { laps: 0, minutes: +$('minutes').value } : { laps: +$('laps').value, minutes: 0 };
+}
+
+// The championship part of the menu: pick a cup, or the season so far.
+function renderChamp() {
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+  const a = Champ.active;
+  $('champ-pick').classList.toggle('hidden', !!a);
+  $('champ-season').classList.toggle('hidden', !a);
+  if (!a) {
+    const box = $('champ-cups');
+    box.innerHTML = '';
+    CUPS.forEach((cup, i) => {
+      const b = document.createElement('button');
+      const medal = Champ.data.medals[cup.id];
+      b.innerHTML = `${medal ? `<span class="medal ${medal}"></span>` : ''}${esc(cup.name)}<small>${Champ.unlocked(i) ? (medal ? medal + ' cup' : 'unlocked') : 'locked'}</small>`;
+      b.disabled = !Champ.unlocked(i);
+      b.classList.toggle('sel', i === Champ.pick);
+      b.onclick = () => {
+        Champ.pick = i;
+        refreshSel();
+        Audio.play('menu_leftright', 0.5);
+      };
+      box.appendChild(b);
+    });
+    const cup = CUPS[Champ.pick];
+    $('row-cls').classList.toggle('hidden', !cup.open);  // a cup races its own class; the open championship any
+    $('champ-info').textContent = cup.open
+      ? 'Six races against drivers from every class. Pick your car below.'
+      : `Six races, one on every track, against seven ${className(cup.cls)} drivers. Finish in the top three to unlock the next cup.`;
+    return;
+  }
+  $('row-cls').classList.add('hidden');
+  $('row-skin').classList.add('hidden');
+  const cup = CUPS[a.cup];
+  $('champ-title').textContent = `${cup.name} · season ${a.season}`;
+  $('champ-next').textContent = Champ.over() ? 'Season complete'
+    : `Race ${a.round + 1} of ${CHAMP_TRACKS.length}: ${manifest.trackNames[CHAMP_TRACKS[a.round]]}`;
+  const last = a.results[a.results.length - 1];
+  $('champ-table').innerHTML = '<tr><th>#</th><th>Driver</th><th>Class</th><th>Team</th>' +
+    (last ? '<th class="num">Last</th>' : '') + '<th class="num">Pts</th></tr>' +
+    Champ.standings().map((d, k) => {
+      const di = a.drivers.indexOf(d);
+      return `<tr class="${d.me ? 'me' : ''}"><td>${k + 1}</td><td>${esc(d.name)}</td><td>${esc(className(d.cls))}</td>` +
+        `<td>${esc(TEAMS[d.skin] || '')}</td>${last ? `<td class="num">${last.got[di] !== undefined ? '+' + last.got[di] : ''}</td>` : ''}` +
+        `<td class="num">${d.pts}</td></tr>`;
+    }).join('');
 }
 
 function setMode(mode) {
@@ -629,7 +782,7 @@ function localLineup(opts) {
 function raceConfig(opts) {
   const cars = opts.racers.map((r) => {
     const c = manifest.classes[r.cls] || manifest.classes[opts.cls];
-    return [r.cls, c.skins[r.skin % c.skins.length], c.topSpeed || 50, r.role].join(',');
+    return [r.cls, c.skins[r.skin % c.skins.length], c.topSpeed || 50, r.role, r.skill || 0].join(',');
   }).join('|');
   return [`track=${opts.track}`, `weather=${opts.weather || 'sunny_bluesky_summer'}`, `wxcat=${opts.weatherCat || ''}`, `laps=${opts.laps || 3}`, `time=${(opts.minutes || 0) * 60}`,
     `practice=${opts.practice ? 1 : 0}`, `ghost=${opts.practice ? opts.ghost || 0 : 0}`, `cars=${cars}`].join(';');
@@ -747,6 +900,8 @@ function showResults() {
   if (!race) return;
   const res = JSON.parse(Module.ccall('bsr_results', 'string', [], []));
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+  const champ = !!race.opts.champ;
+  if (champ && !race.scored) race.scored = Champ.record(res, race.opts.racers);
   const open = race.opts.racers.some((r) => r.cls !== race.opts.racers[0].cls);
   const timed = race.opts.minutes > 0;
   const rows = res.map((r) => {
@@ -754,14 +909,16 @@ function showResults() {
     const time = r.finished ? fmtTime(r.time) : r.gone ? 'left' : race.opts.online ? 'running' : '—';
     return `<tr class="${r.player ? 'me' : ''}"><td>${r.place}</td><td>${esc(name)}</td>` +
       (open ? `<td>${esc(className(r.cls))}</td>` : '') +
-      (timed ? `<td>${r.lap}</td>` : '') + `<td>${time}</td><td>${fmtTime(r.best)}</td></tr>`;
+      (timed ? `<td>${r.lap}</td>` : '') + `<td>${time}</td><td>${fmtTime(r.best)}</td>` +
+      (champ ? `<td>+${race.scored[race.opts.racers[r.i].driver] ?? 0}</td>` : '') + '</tr>';
   }).join('');
   $('res-table').innerHTML = '<tr><th>#</th><th>Driver</th>' + (open ? '<th>Class</th>' : '') + (timed ? '<th>Laps</th>' : '') +
-    '<th>Time</th><th>Best lap</th></tr>' + rows;
+    '<th>Time</th><th>Best lap</th>' + (champ ? '<th>Pts</th>' : '') + '</tr>' + rows;
   const online = !!race.opts.online;
-  $('again').classList.toggle('hidden', online && !Net.isHost());
+  $('again').classList.toggle('hidden', (online && !Net.isHost()) || champ);
   $('res-note').textContent = online ? (Net.isHost() ? 'Race again starts a new race for the whole room.' : 'The host starts the next race.') : '';
-  $('tomenu').textContent = online ? 'LOBBY' : 'MENU';
+  $('tomenu').textContent = online ? 'LOBBY' : champ ? 'CHAMPIONSHIP' : 'MENU';
+  if (champ) $('res-note').textContent = Champ.over() ? 'That was the last race of the season.' : '';
   if ($('results').classList.contains('hidden')) show('results');
   // Online, others may still be racing: keep the table live.
   clearInterval(showResults.timer);
@@ -1285,6 +1442,14 @@ window.addEventListener('blur', () => showBoard(false));
 const inMenu = () => !$('menu').classList.contains('hidden');
 $('go').onclick = () => {
   if (sel.mode === 'online') return Net.startRace();
+  if (sel.mode === 'champ') {
+    if (!Champ.active) {
+      if (!Champ.unlocked(Champ.pick)) return;
+      Champ.start(Champ.pick, CUPS[Champ.pick].cls || sel.cls, sel.skin);
+      return refreshSel();
+    }
+    return startRace(Champ.raceOpts());
+  }
   startRace({ track: sel.track, cls: sel.cls, skin: sel.skin, skin2: sel.skin2, split: sel.mode === 'split',
     practice: sel.mode === 'practice', ghost: sel.ghost, raceType: sel.raceType, opponents: +$('opp').value,
     weather: $('weather').value, ...raceLength() });
@@ -1296,14 +1461,37 @@ const replay = () => {
 const online = () => !!(race && race.opts.online);
 $('resume').onclick = () => { Module.ccall('bsr_set_paused', null, ['number'], [0]); show(null); $('canvas').focus(); };
 $('restart').onclick = replay;
+$('champ-skip').onclick = () => {
+  if (!Champ.active || !confirm('Skip this race? You finish last and get one point.')) return;
+  Champ.skip();
+  if (Champ.over()) champFinished();
+  refreshSel();
+};
+$('champ-abandon').onclick = () => {
+  if (!Champ.active || !confirm('Abandon the championship? Your points will be lost.')) return;
+  Champ.abandon();
+  refreshSel();
+};
 $('podium-go').onclick = () => showResults();
 $('again').onclick = replay;
 $('quit').onclick = $('tomenu').onclick = () => {
   if (online()) Net.leaveRace();
   else stopRace();
   show('menu');
+  if (Champ.over()) champFinished();
   refreshSel();
 };
+
+// Season over: hand out the cup and unlock the next championship.
+function champFinished() {
+  const { place, medal, cup } = Champ.finish();
+  const next = CUPS[CUPS.indexOf(cup) + 1];
+  setStatus(medal
+    ? `${cup.name}: you finished ${place}${['st', 'nd', 'rd'][place - 1]} and won the ${medal} cup!` +
+      (next ? ` ${next.name} is unlocked.` : '')
+    : `${cup.name}: you finished ${place}th. Finish in the top three to win a cup.`);
+  Audio.play(medal ? 'FX_env_crowd_applause_22' : 'menu_action', 0.7);
+}
 $('net-name').value = (() => { try { return localStorage.getItem('bsr-name') || ''; } catch (e) { return ''; } })();
 $('net-create').onclick = () => Net.open({ t: 'create', name: Net.name() });
 $('net-join').onclick = () => {

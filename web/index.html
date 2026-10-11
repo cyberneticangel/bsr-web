@@ -54,7 +54,7 @@
   <h1>BIG SCALE RACING</h1>
   <p class="sub">WebAssembly port · original BumbleBeast data</p>
   <div class="row"><label>Mode</label><div id="modes" class="choices">
-    <button data-v="single">Quick race</button><button data-v="practice">Practice</button><button data-v="split">Split screen</button><button data-v="online">Online</button>
+    <button data-v="single">Quick race</button><button data-v="practice">Practice</button><button data-v="champ">Championship</button><button data-v="split">Split screen</button><button data-v="online">Online</button>
   </div></div>
   <div id="online" class="hidden">
     <div id="online-join">
@@ -68,10 +68,23 @@
       <ul id="net-players"></ul>
     </div>
   </div>
-  <div class="row"><label>Track</label><div id="tracks" class="choices"></div></div>
-  <div class="row"><label>Class</label><select id="cls"></select></div>
-  <div class="row"><label>Weather</label><select id="weather"></select></div>
-  <div class="row"><label id="skin-label">Skin</label><div id="skins" class="choices skins"></div></div>
+  <div id="champ" class="hidden">
+    <div id="champ-pick">
+      <div class="row"><label>Cup</label><div id="champ-cups" class="choices cups"></div></div>
+      <p id="champ-info" class="sub"></p>
+    </div>
+    <div id="champ-season" class="hidden">
+      <h2 id="champ-title"></h2>
+      <p id="champ-next" class="sub"></p>
+      <table id="champ-table" class="table"></table>
+      <div class="row champ-btns"><button id="champ-skip" title="You finish last and get one point">Skip race</button>
+        <button id="champ-abandon">Abandon championship</button></div>
+    </div>
+  </div>
+  <div class="row" id="row-track"><label>Track</label><div id="tracks" class="choices"></div></div>
+  <div class="row" id="row-cls"><label>Class</label><select id="cls"></select></div>
+  <div class="row" id="row-weather"><label>Weather</label><select id="weather"></select></div>
+  <div class="row" id="row-skin"><label id="skin-label">Skin</label><div id="skins" class="choices skins"></div></div>
   <div class="row hidden" id="row-skin2"><label>P2 skin</label><div id="skins2" class="choices skins"></div></div>
   <div class="row" id="row-racetype"><label>Race type</label><div id="racetype" class="choices">
     <button data-v="cup" title="Only opponents of your class">Cup race</button><button data-v="open" title="Opponents from all classes">Open race</button>
