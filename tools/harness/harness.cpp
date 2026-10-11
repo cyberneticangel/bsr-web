@@ -2,7 +2,7 @@
 // saves screenshots and prints race statistics.
 //
 // usage: harness <data dir> <track> <class> <out dir> <race seconds> [shot times...]
-//        options via env: CAM=0|1|2, OPP=n, LAPS=n, TOP=kmh, SKINS=a,b,c
+//        options via env: CAM=0..5 (follow, follow2, follow3, bumper, tower, TV), OPP=n, LAPS=n, TOP=kmh, SKINS=a,b,c
 //        WEATHER=preset WXCAT=sunny|cloudy|sunset|wet|rain
 //        TIME=s (timed race), PRACTICE=1, GHOST=1|2, CLASSES=a,b (AI classes, open race)
 //        STOP_AT=s      the player brakes to a stop at s (e.g. to watch the ghost drive on)

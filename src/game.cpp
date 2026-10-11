@@ -138,6 +138,7 @@ bool Game::start(const RaceConfig& cfgIn) {
         world_.build(fst_);
         FSO prizeFso;
         if (loadFSO("prizes_track.fso", prizeFso)) gfx_.buildModel(prizeFso, "", prizes_);
+        if (!loadTrackCams(t, cams_)) cams_.clear();
         speakers_.clear();
         for (const Part& p : track_.parts) {
             std::string n = lower(p.name);
@@ -288,12 +289,12 @@ void Game::stop() {
 
 void Game::cycleCamera(int p) {
     if (p < 0 || p >= (int)players_.size()) return;
-    players_[p].camMode = (players_[p].camMode + 1) % 3;
+    players_[p].camMode = (players_[p].camMode + 1) % kCamModes;
     players_[p].camInit = false;
 }
 
 void Game::setCamera(int m) {
-    defaultCam_ = m % 3;
+    defaultCam_ = ((m % kCamModes) + kCamModes) % kCamModes;
     for (auto& v : players_) { v.camMode = defaultCam_; v.camInit = false; }
 }
 
@@ -519,26 +520,61 @@ void Game::update(float dt, const Input* in, int numInputs) {
         }
 }
 
+const TrackCam* Game::findCam(const std::string& name) const {
+    for (const TrackCam& c : cams_)
+        if (lower(c.name) == name) return &c;
+    return nullptr;
+}
+
 void Game::updateCamera(View& v, float dt, int x, int y, int w, int h) {
     const Car& c = racers_[v.racer].car;
     V3 fwd = c.R.col(1);
     V3 flatF = norm(V3(fwd.x, fwd.y, 0));
+    float scale = std::max(1.0f, c.boundRadius / 0.42f);  // bigger cars (monster trucks) need a wider view
     V3 eye, at;
-    if (v.camMode == 2) {  // bumper
-        eye = c.pos + fwd * (0.25f * std::max(1.0f, c.boundRadius / 0.42f)) + c.R.col(2) * 0.2f;
+    float hfov = 1.6f;
+    // The view this mode uses: a player camera from the track's camera file, or for TV the set-1 camera that
+    // covers the car's stretch of the racing line.
+    static const char* names[] = {"follow", "follow2", "follow3", "bumper", "tower"};
+    const TrackCam* cam = v.camMode < CamTV ? findCam(names[v.camMode]) : nullptr;
+    int type = v.camMode == CamBumper ? 2 : v.camMode == CamTower ? 1 : 3;
+    if (v.camMode == CamTV && !meta_.aiLines.empty()) {
+        const Path& line = meta_.aiLines[0];
+        v.tvHint = line.nearest(c.pos, v.tvHint, v.camInit ? 60 : 0);
+        float d = line.dist[v.tvHint];
+        for (const TrackCam& tc : cams_)
+            if (tc.use == 2 && tc.name.rfind("1_", 0) == 0 && d >= tc.range0 && d < tc.range1) cam = &tc;
+        type = cam ? cam->type : 3;
+    }
+    if (cam && cam->fov > 0.2f) hfov = cam->fov;
+    if (type == 2) {  // bumper
+        eye = c.pos + fwd * (0.25f * scale) + c.R.col(2) * 0.2f;
         at = eye + fwd * 2.0f;
-    } else {
-        float scale = std::max(1.0f, c.boundRadius / 0.42f);  // bigger cars (monster trucks) need a wider view
-        float dist = (v.camMode == 0 ? 1.25f : 2.3f) * scale, hgt = (v.camMode == 0 ? 0.45f : 0.9f) * scale;
+        if (!cam) hfov = 1.75f;
+    } else if (type == 1) {  // fixed: the driver's stand (tower) or a trackside TV camera, zooming on the car
+        V3 p = cam ? V3(cam->pos.x, cam->pos.y, cam->pos.z) : meta_.grid.empty() ? V3(0, 0, 5) : meta_.grid[0].pos + V3(0, 0, 4.9f);
+        eye = p;
+        at = c.pos + V3(0, 0, 0.1f * scale);
+        float d = len(at - eye);
+        // Keep the car a steady size: about 3 m (tower) or 4 m (TV) of track across the picture.
+        float span = (v.camMode == CamTower ? 3.0f : 4.0f) * scale;
+        hfov = clampf(2 * std::atan(span * 0.5f / std::max(d, 0.1f)), 0.08f, cam ? cam->fov : 1.2f);
+        v.camInit = false;  // back to a chase: start there instead of flying over
+    } else {  // chase: back, up and look-at height from the camera file (follow: 2.8 m back, 1.1 m up)
+        static const float defaults[3][3] = {{2.8f, 1.1f, 0.4f}, {1.4f, 0.6f, 0.3f}, {1.0f, 0.5f, 0.2f}};
+        const float* def = defaults[std::min(v.camMode, 2)];
+        bool useCam = cam && cam->offset.x < -0.1f;
+        float back = (useCam ? -cam->offset.x : def[0]) * scale, up = (useCam ? cam->offset.y : def[1]) * scale;
+        float look = (useCam ? cam->offset.z : def[2]) * scale;
         V3 vflat(c.vel.x, c.vel.y, 0);
         V3 dir = len(vflat) > 2.0f && dot(vflat, flatF) > 0 ? norm(vflat * 0.5f + flatF) : flatF;
-        V3 want = c.pos - dir * dist + V3(0, 0, hgt);
+        V3 want = c.pos - dir * back + V3(0, 0, up);
         if (!v.camInit) { v.camPos = want; v.camInit = true; }
         v.camPos += (want - v.camPos) * (1.0f - std::exp(-dt * 7.0f));
         float gz = world_.groundHeight(v.camPos.x, v.camPos.y, v.camPos.z + 1.0f);
         if (v.camPos.z < gz + 0.12f) v.camPos.z = gz + 0.12f;
         eye = v.camPos;
-        at = c.pos + V3(0, 0, 0.12f) + flatF * 0.3f;
+        at = c.pos + V3(0, 0, look * 0.5f) + flatF * (look * 1.5f);
     }
     M4 view = M4::lookAt(eye, at, V3(0, 0, 1));
     camEye_ = eye;
@@ -546,10 +582,9 @@ void Game::updateCamera(View& v, float dt, int x, int y, int w, int h) {
     camUp_ = V3(view.m[1], view.m[5], view.m[9]);
     if (cb.listener && &v == &players_[0]) cb.listener(eye, norm(at - eye), V3(0, 0, 1));
     float aspect = (float)w / std::max(h, 1);
-    float fovy = v.camMode == 2 ? 1.2f : 1.05f;
-    // Split-screen views are very wide: cap the horizontal field of view instead of stretching it.
-    const float kMaxAspect = 2.2f;
-    if (aspect > kMaxAspect) fovy = 2 * std::atan(std::tan(fovy * 0.5f) * kMaxAspect / aspect);
+    // The original's fields of view are horizontal (at 4:3); keep them horizontal on wide screens and
+    // split-screen halves, so the framing matches.
+    float fovy = 2 * std::atan(std::tan(hfov * 0.5f) / std::max(aspect, 4.0f / 3.0f));
     M4 proj = M4::perspective(fovy, aspect, 0.05f, 900.0f);
     if (&v == &players_[0]) { viewProj0_ = proj * view; eye0_ = eye; }
     gfx_.beginFrame(x, y, w, h, view, proj, eye);

@@ -33,6 +33,8 @@ let manifest = null;
 const loaded = new Set();
 const sel = { mode: 'single', track: 'baanbreker', cls: 'pro_std', skin: 0, skin2: 1, raceType: 'cup', lenMode: 'laps', ghost: 1 };
 const RACE_MINUTES = [1, 2, 3, 5, 10, 20];
+// Camera modes (Game::Cam): the original's views from Tracks/<track>_cams.bin.
+const CAMERAS = ['FOLLOW', 'FOLLOW 2', 'FOLLOW 3', 'BUMPER', 'TOWER', 'TV'];
 // Menu weather, as in the original. Each track's <track>_weather_<cat>.bin lists the presets a category picks from.
 const WEATHER_CATS = { sunny: 'Sunny', cloudy: 'Cloudy', sunset: 'Sunset', wet: 'Wet', rain: 'Rain', random: 'Random' };
 
@@ -955,10 +957,12 @@ var Module = {
   printErr: (t) => { console.warn(t); if (params.get('auto')) fetch('/log', { method: 'POST', body: t }).catch(() => {}); },
   onHud(json, p = 0) {
     const h = JSON.parse(json);
-    const prev = hudStates[p];
-    for (const k of Object.keys(prev)) delete prev[k];
-    Object.assign(prev, h);
+    const prev = { ...hudStates[p] };
+    const state = hudStates[p];
+    for (const k of Object.keys(state)) delete state[k];
+    Object.assign(state, h);
     const pre = p ? 'h2-' : 'h-';
+    if (prev.cam !== undefined && h.cam !== prev.cam) flash(CAMERAS[h.cam] || '', 1000, p);
     $(pre + 'place').textContent = h.place;
     $(pre + 'racers').textContent = h.racers;
     $(pre + 'lap').textContent = h.lap;

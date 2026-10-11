@@ -103,6 +103,21 @@ struct TrackWeather {
     std::vector<float> weights;
 };
 bool loadTrackWeather(const std::string& track, const std::string& category, TrackWeather& out);
+
+// Tracks/<track>_cams.bin (XOR): the original's cameras, 220-byte records. Player views ("follow",
+// "follow2", "follow3", "Bumper", "tower"), TV/replay sets ("1_1".."3_6") that take over by distance along the
+// racing line, and "podium".
+struct TrackCam {
+    std::string name;
+    int type = 0;           // 1 fixed position looking at the car, 2 on the car (bumper), 3 chasing it
+    int use = 0;            // 1 race, 2 TV/replay, 3 practice/podium
+    float fov = 1.2f;       // horizontal, radians
+    float zoom[3] = {1, 2, 1};
+    float range0 = 0, range1 = 0;  // TV: metres along the racing line
+    Vec3 pos{0, 0, 0};      // fixed cameras
+    Vec3 offset{0, 0, 0};   // chase cameras: back, up, look-at height (metres)
+};
+bool loadTrackCams(const std::string& track, std::vector<TrackCam>& out);
 std::vector<std::string> weatherPresets();
 
 }  // namespace bsr

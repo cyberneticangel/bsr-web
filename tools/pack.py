@@ -129,7 +129,7 @@ def main(data, web):
     manifest['weather'] = {}
     for t in TRACKS:
         files = set()
-        for suf in ('_high.fso', '_high.fst', '_meta.fso', '.bin'):
+        for suf in ('_high.fso', '_high.fst', '_meta.fso', '.bin', '_cams.bin'):
             rel = 'tracks/%s%s' % (t, suf)
             if rel in index:
                 files.add(rel)

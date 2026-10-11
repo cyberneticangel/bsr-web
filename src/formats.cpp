@@ -459,4 +459,28 @@ bool loadTrackWeather(const std::string& track, const std::string& category, Tra
     return true;
 }
 
+// Record: char name[32]; u32 type @0x20, use @0x24; float near @0x2c, far @0x30, fov @0x34; char target[32]
+// @0x44 ("m_body"); float range0 @0x64, range1 @0x68; zoom[3] @0x70; pos[3] @0x7c; offset[3] @0xcc.
+bool loadTrackCams(const std::string& track, std::vector<TrackCam>& out) {
+    Bytes d;
+    if (!readFile("tracks/" + track + "_cams.bin", d)) return false;
+    xorDecrypt(d.data(), d.size());
+    out.clear();
+    for (size_t o = 0; o + 220 <= d.size(); o += 220) {
+        const uint8_t* r = &d[o];
+        TrackCam c;
+        c.name = fixedStr(r, 32);
+        c.type = (int)rd<uint32_t>(r + 0x20);
+        c.use = (int)rd<uint32_t>(r + 0x24);
+        c.fov = rd<float>(r + 0x34);
+        c.range0 = rd<float>(r + 0x64);
+        c.range1 = rd<float>(r + 0x68);
+        for (int i = 0; i < 3; i++) c.zoom[i] = rd<float>(r + 0x70 + i * 4);
+        c.pos = {rd<float>(r + 0x7c), rd<float>(r + 0x80), rd<float>(r + 0x84)};
+        c.offset = {rd<float>(r + 0xcc), rd<float>(r + 0xd0), rd<float>(r + 0xd4)};
+        out.push_back(c);
+    }
+    return !out.empty();
+}
+
 }  // namespace bsr

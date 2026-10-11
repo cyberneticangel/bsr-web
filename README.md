@@ -41,7 +41,7 @@ python3 tools/devserver.py 8000
 | Throttle / brake & reverse | ↑ / ↓ or W / S | RT / LT (or A / X) |
 | Steer | ← → or A D | left stick |
 | Handbrake | Space | B |
-| Camera (chase / far / bumper) | C | |
+| Camera (follow / follow 2 / follow 3 / bumper / tower / TV) | C | |
 | Reset car onto the track | R | |
 | Pause | P or Esc | |
 | Debug lines (checkpoints, AI line) | F2 | |

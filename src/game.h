@@ -51,6 +51,8 @@ class Game {
 public:
     enum State { Idle, Countdown, Racing, Finished, Podium };
     static const int kMaxLocal = 2;
+    // Camera modes, the original's player views (Tracks/<track>_cams.bin), cycled with C.
+    enum Cam { CamFollow, CamFollow2, CamFollow3, CamBumper, CamTower, CamTV, kCamModes };
 
     bool init();
     bool start(const RaceConfig& cfg);
@@ -113,6 +115,7 @@ private:
     struct View {
         int racer = 0;
         int camMode = 0;
+        int tvHint = 0;  // racing line index near the car (TV camera choice)
         V3 camPos;
         bool camInit = false;
     };
@@ -148,6 +151,8 @@ private:
     std::vector<View> players_;          // local human players, in player order
     RaceConfig cfg_;
     std::vector<V3> speakers_;
+    std::vector<TrackCam> cams_;
+    const TrackCam* findCam(const std::string& name) const;
     std::map<std::string, FSO> carFsos_;  // per class, for this race
     int laps_ = 3;
     bool timeUp_ = false;
