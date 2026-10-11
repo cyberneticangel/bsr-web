@@ -237,6 +237,13 @@ EMSCRIPTEN_KEEPALIVE const uint8_t* bsr_preview(const char* cls, const char* ski
     return px.data();
 }
 
+// Cars on screen in player 0's view, for name tags: JSON [[racer, x, y, distance], ...], x/y in 0..1 of the canvas.
+EMSCRIPTEN_KEEPALIVE const char* bsr_screen(int remoteOnly) {
+    static std::string out;
+    out = game.screenJson(remoteOnly != 0);
+    return out.c_str();
+}
+
 // Trackside speaker positions as JSON [[x,y,z],...] (valid once a race has started on the track).
 EMSCRIPTEN_KEEPALIVE const char* bsr_speakers() {
     static std::string out;

@@ -680,7 +680,7 @@ async function startRace(opts) {
     show(null);
     for (const pre of ['h-', 'h2-']) $(pre + 'msg').textContent = '';
     $('h-keys').textContent = local > 1 ? 'WASD drive · Space handbrake · C camera · R reset · P pause'
-      : '↑↓←→ drive · Space handbrake · C camera · R reset' + (opts.online ? ' · Esc menu' : ' · P pause');
+      : '↑↓←→ drive · Space handbrake · C camera · R reset' + (opts.online ? ' · Esc menu' : ' · P pause') + ' · Tab standings';
     $('h2-keys').textContent = '↑↓←→ drive · Right Shift handbrake · . camera · Backspace reset';
     Hud.shown = ['', ''];
     $('canvas').focus();
@@ -856,6 +856,7 @@ var Module = {
 // through the relay in tools/devserver.py; everyone else draws it interpolated (src/netsync.*).
 const Net = {
   ws: null, id: 0, room: '', host: 0, players: [], profiles: {}, settings: null,
+  rtt: 0, stats: {}, statTimer: 0, lastState: {},  // ping to the relay; peers' { ping, state }; racer -> last packet time
   race: null,      // { id, opts, lineup, mine: [racer indices simulated here], ready: Set, started, go }
   ptr: 0, floats: 0, sendTimer: 0,
 
@@ -889,6 +890,9 @@ const Net = {
     this.players = [];
     this.profiles = {};
     this.settings = null;
+    this.stats = {};
+    this.rtt = 0;
+    clearInterval(this.statTimer);
     if (this.race && race && race.opts.online) {  // finish the race alone: drop everyone else's car
       for (let i = 0; i < this.race.lineup.length; i++)
         if (!this.race.mine.includes(i)) Module.ccall('bsr_remove_racer', null, ['number'], [i]);
@@ -910,7 +914,18 @@ const Net = {
         this.room = m.room;
         setStatus('');
         this.sendProfile();
+        clearInterval(this.statTimer);
+        this.statTimer = setInterval(() => this.tickStats(), 2000);
+        this.tickStats();
         break;
+      case 'pong': {
+        const rtt = performance.now() - m.ts;
+        if (rtt >= 0 && rtt < 10000) this.rtt = this.rtt ? this.rtt * 0.7 + rtt * 0.3 : rtt;
+        return;
+      }
+      case 'stat':
+        this.stats[m.from] = { ping: +m.ping || 0, state: String(m.state || ''), at: performance.now() };
+        return;
       case 'peers': {
         const before = new Set(this.players.map((p) => p.id));
         const hostBefore = this.host;
@@ -965,6 +980,19 @@ const Net = {
     this.renderLobby();
   },
 
+  // Every 2 s: measure the round trip to the relay and tell the room our ping and what we're doing.
+  tickStats() {
+    if (!this.connected()) return;
+    this.send({ t: 'ping', ts: performance.now() });
+    const state = this.race ? (race && race.opts === this.race.opts ? (race.finished.size ? 'finished' : 'racing') : 'loading')
+      : 'lobby';
+    this.send({ t: 'stat', ping: Math.round(this.rtt), state });
+  },
+  // Rough latency between us and a peer: half of each round trip to the relay.
+  latency(peer) {
+    const st = this.stats[peer];
+    return st ? Math.round((this.rtt + st.ping) / 2) : null;
+  },
   sendProfile() { if (this.connected()) this.send({ t: 'profile', skin: sel.skin, cls: sel.cls }); },
 
   pushSettings() {
@@ -1117,11 +1145,44 @@ const Net = {
     const f = new Float32Array(buf);
     if (f[0] !== r.id) return;
     const n = Math.min(f[1] | 0, Math.floor((f.length - 2) / (1 + this.floats)));
+    const now = performance.now();
     for (let k = 0; k < n; k++) {
       const o = 2 + k * (1 + this.floats);
+      this.lastState[f[o] | 0] = now;
       Module.HEAPF32.set(f.subarray(o + 1, o + 1 + this.floats), this.ptr >> 2);
       Module.ccall('bsr_put_state', null, ['number', 'number'], [f[o] | 0, this.ptr]);
     }
+  },
+
+  // Name tags over the other players' cars: name, a coloured dot for the connection and the latency.
+  tags() {
+    const box = $('tags');
+    const r = this.race;
+    if (!r || !race || race.opts !== r.opts || !$('menu').classList.contains('hidden')) { box.innerHTML = ''; return; }
+    const seen = new Set(), now = performance.now();
+    const W = box.clientWidth, H = box.clientHeight;
+    for (const [i, x, y, d] of JSON.parse(Module.ccall('bsr_screen', 'string', ['number'], [1]))) {
+      const e = r.lineup[i];
+      if (!e || !e.peer || d > 45) continue;
+      seen.add(String(i));
+      let el = box.querySelector(`[data-i="${i}"]`);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'nametag';
+        el.dataset.i = i;
+        el.innerHTML = '<span class="dot"></span><span class="n"></span><span class="ping"></span>';
+        el.querySelector('.n').textContent = e.name;
+        box.appendChild(el);
+      }
+      const lat = this.latency(e.peer), stale = now - (this.lastState[i] || 0) > 1000;
+      const dot = el.querySelector('.dot');
+      dot.classList.toggle('bad', stale || lat > 180);
+      dot.classList.toggle('mid', !stale && lat > 90 && lat <= 180);
+      el.querySelector('.ping').textContent = stale ? 'lag' : lat === null ? '' : lat + ' ms';
+      const k = Math.max(0.55, Math.min(1.15, 5 / Math.max(d, 0.1)));
+      el.style.transform = `translate(${(x * W).toFixed(1)}px, ${(y * H).toFixed(1)}px) translate(-50%, -100%) scale(${k.toFixed(3)})`;
+    }
+    for (const el of [...box.children]) if (!seen.has(el.dataset.i)) el.remove();
   },
 
   // Leave the current race (to the lobby); the room stays.
@@ -1136,6 +1197,61 @@ const Net = {
     this.race = null;
   },
 };
+
+// ------------------------------------------------------------------ Tab: standings / players
+function showBoard(on) {
+  $('board').classList.toggle('hidden', !on);
+  clearInterval(showBoard.timer);
+  if (!on) return;
+  renderBoard();
+  showBoard.timer = setInterval(renderBoard, 500);
+}
+
+function renderBoard() {
+  if (!race) return showBoard(false);
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+  const online = !!race.opts.online && Net.connected();
+  const res = JSON.parse(Module.ccall('bsr_results', 'string', [], []));
+  const lineup = online && Net.race ? Net.race.lineup : [];
+  const dot = (ms) => `<span class="dot ${ms > 180 ? 'bad' : ms > 90 ? 'mid' : ''}"></span>`;
+  const rows = res.map((r) => {
+    const entry = race.opts.racers[r.i] || {};
+    const peer = lineup[r.i] && lineup[r.i].peer;
+    let ping = '', state = r.gone ? 'left' : r.finished ? fmtTime(r.time) : `lap ${Math.max(1, r.lap + 1)}`;
+    if (online && peer) {
+      const ms = peer === Net.id ? Math.round(Net.rtt) : (Net.stats[peer] || {}).ping;
+      ping = ms === undefined ? '' : `<span class="ping">${dot(ms)}${ms} ms</span>`;
+    }
+    return `<tr class="${r.player ? 'me' : ''}"><td>${r.place}</td><td>${esc(race.names[r.i] || 'CPU')}</td>` +
+      `<td>${esc(className(entry.cls || r.cls))}</td><td>${esc(TEAMS[entry.skin] || '')}</td><td>${state}</td>` +
+      (online ? `<td>${ping}</td>` : '') + '</tr>';
+  });
+  if (online) {  // in the room but not in this race (joined later, or still loading the next one)
+    const inRace = new Set(lineup.map((e) => e.peer));
+    for (const p of Net.players) {
+      if (inRace.has(p.id)) continue;
+      const st = Net.stats[p.id] || {};
+      rows.push(`<tr class="lobby"><td></td><td>${esc(p.name)}</td><td></td><td></td><td>${esc(st.state || 'lobby')}</td>` +
+        `<td>${st.ping !== undefined ? `<span class="ping">${dot(st.ping)}${st.ping} ms</span>` : ''}</td></tr>`);
+    }
+  }
+  $('board-title').textContent = online ? `ROOM ${Net.room} · ${Net.players.length} PLAYER${Net.players.length === 1 ? '' : 'S'}` : 'STANDINGS';
+  $('board-table').innerHTML = `<tr><th>#</th><th>Driver</th><th>Class</th><th>Team</th><th>Race</th>${online ? '<th>Ping</th>' : ''}</tr>` +
+    rows.join('');
+}
+
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'Tab' || !race || inMenu()) return;
+  e.preventDefault();
+  if (!e.repeat) showBoard(true);
+});
+window.addEventListener('keyup', (e) => { if (e.code === 'Tab') showBoard(false); });
+window.addEventListener('blur', () => showBoard(false));
+(function tagLoop() {
+  if (race && race.opts.online) Net.tags();
+  else if ($('tags').firstChild) $('tags').innerHTML = '';
+  requestAnimationFrame(tagLoop);
+})();
 
 // ------------------------------------------------------------------ UI wiring
 const inMenu = () => !$('menu').classList.contains('hidden');

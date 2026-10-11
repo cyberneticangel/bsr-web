@@ -67,6 +67,9 @@ public:
     // Renders one car (class, skin texture) on a transparent background for the menu. rgba: w*h*4, rows bottom-up.
     bool renderPreview(const std::string& cls, const std::string& skin, int w, int h, std::vector<uint8_t>& rgba);
     std::string resultsJson() const;
+    // Where the cars are on screen in player 0's view (for name tags): JSON [[racer, x, y, distance], ...] with
+    // x, y in 0..1 of the canvas (y down), for cars in front of the camera. remoteOnly: only network cars.
+    std::string screenJson(bool remoteOnly) const;
 
     // Networking. now: local clock in seconds.
     bool packState(int racer, double now, float* out) const;  // false unless the racer is simulated here
@@ -124,6 +127,9 @@ private:
     Renderer gfx_;
     Effects fx_;
     V3 camEye_, camRight_, camUp_;  // the view being drawn
+    M4 viewProj0_;                  // player 0's last camera
+    V3 eye0_;
+    float vp0_[4] = {0, 0, 1, 1};    // and its viewport as fractions of the canvas: x, y (from top), w, h
     std::string trackName_, weatherName_;
     bool rain_ = false, wet_ = false, thunder_ = false;
     FSO trackFso_;

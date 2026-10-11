@@ -68,6 +68,7 @@ class Relay:
     Client -> server (JSON text):
       {"t": "create", "name": str}            new room; the creator is host
       {"t": "join", "room": str, "name": str}
+      {"t": "ping", "ts": number}             answered by the server itself with {"t": "pong", "ts": same}
       any other JSON object                   forwarded to the room ("to": id sends to one peer only)
       binary                                  forwarded to every other peer in the room (car states)
     Server -> client:
@@ -94,6 +95,9 @@ class Relay:
         if not isinstance(msg, dict):
             return
         t = msg.get('t')
+        if t == 'ping':  # round-trip time to the relay, for the players' connection status
+            peer.send_json({'t': 'pong', 'ts': msg.get('ts')})
+            return
         name = str(msg.get('name', ''))[:20].strip() or 'Player'
         if t in ('create', 'join'):
             if peer.room:

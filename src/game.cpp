@@ -540,6 +540,7 @@ void Game::updateCamera(View& v, float dt, int x, int y, int w, int h) {
     const float kMaxAspect = 2.2f;
     if (aspect > kMaxAspect) fovy = 2 * std::atan(std::tan(fovy * 0.5f) * kMaxAspect / aspect);
     M4 proj = M4::perspective(fovy, aspect, 0.05f, 900.0f);
+    if (&v == &players_[0]) { viewProj0_ = proj * view; eye0_ = eye; }
     gfx_.beginFrame(x, y, w, h, view, proj, eye);
 }
 
@@ -584,6 +585,10 @@ void Game::render(int w, int h) {
     if (racers_.empty() || players_.empty()) return;
     int nv = (int)players_.size();
     int vh = h / nv;
+    vp0_[0] = 0;
+    vp0_[1] = 0;
+    vp0_[2] = 1;
+    vp0_[3] = 1.0f / nv;
     for (int v = 0; v < nv; v++) {
         updateCamera(players_[v], camDt_, 0, h - (v + 1) * vh, w, vh);  // GL origin is bottom-left; player 0 on top
         draw();
@@ -677,6 +682,26 @@ void Game::clearance(int racer, float& body, float& wheel) const {
         V3 hub = bm.point(cm.wheelCentre[w] + V3(0, 0, r.car.wheels[w].comp));
         wheel = std::min(wheel, below(hub - r.car.R.col(2) * r.car.wheels[w].radius));
     }
+}
+
+std::string Game::screenJson(bool remoteOnly) const {
+    std::string out = "[";
+    const float* m = viewProj0_.m;
+    for (size_t i = 0; i < racers_.size(); i++) {
+        const Racer& r = racers_[i];
+        if (r.gone || (remoteOnly && !r.remote) || (!players_.empty() && (int)i == players_[0].racer)) continue;
+        V3 p = r.car.pos + V3(0, 0, r.car.boundRadius * 0.8f + 0.06f);  // just above the roof
+        float cx = m[0] * p.x + m[4] * p.y + m[8] * p.z + m[12], cy = m[1] * p.x + m[5] * p.y + m[9] * p.z + m[13];
+        float cw = m[3] * p.x + m[7] * p.y + m[11] * p.z + m[15];
+        if (cw < 0.05f) continue;  // behind the camera
+        float x = (cx / cw + 1) * 0.5f, y = 1 - (cy / cw + 1) * 0.5f;
+        if (x < -0.1f || x > 1.1f || y < -0.1f || y > 1.1f) continue;
+        char b[96];
+        snprintf(b, sizeof b, "%s[%d,%.4f,%.4f,%.2f]", out.size() > 1 ? "," : "", (int)i, vp0_[0] + x * vp0_[2],
+                 vp0_[1] + y * vp0_[3], len(p - eye0_));
+        out += b;
+    }
+    return out + "]";
 }
 
 bool Game::packState(int racer, double now, float* out) const {

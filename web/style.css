@@ -86,6 +86,24 @@ button.big { display: block; width: 100%; margin: 18px 0 8px; padding: 12px; fon
   animation: pop 0.9s ease-out; }
 @keyframes pop { 0% { opacity: 0; scale: 1.6; } 15% { opacity: 1; scale: 1; } 80% { opacity: 1; } 100% { opacity: 0.2; } }
 .msg { position: absolute; left: 0; right: 0; top: 18%; text-align: center; font-size: 2.4em; color: #fff; }
+/* Name tags over the other players' cars (online), and the Tab standings board. */
+#tags { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+.nametag { position: absolute; left: 0; top: 0; transform-origin: 50% 100%; white-space: nowrap; padding: 3px 8px 3px 7px;
+  background: rgba(10, 12, 16, 0.72); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 5px; font-size: 13px;
+  font-weight: bold; color: #fff; display: flex; align-items: center; gap: 6px; }
+.nametag::after { content: ""; position: absolute; left: 50%; bottom: -6px; margin-left: -5px; border: 5px solid transparent;
+  border-top-color: rgba(10, 12, 16, 0.72); border-bottom: 0; }
+.nametag .ping { font-size: 11px; font-weight: normal; color: var(--muted); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #5d6; flex: none; }
+.dot.mid { background: #fc3; }
+.dot.bad { background: #f54; }
+#board { pointer-events: none; width: min(680px, calc(100vw - 32px)); }
+#board-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 14px; }
+#board-table td, #board-table th { padding: 5px 8px; border-bottom: 1px solid #2a2f38; text-align: left; }
+#board-table th { color: var(--muted); font-weight: normal; font-size: 12px; text-transform: uppercase; }
+#board-table tr.me td { color: var(--accent); font-weight: bold; }
+#board-table tr.lobby td { color: var(--muted); }
+#board-table .ping { display: flex; align-items: center; gap: 6px; }
 #res-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 #res-table td, #res-table th { padding: 6px 8px; border-bottom: 1px solid #2a2f38; text-align: left; }
 #res-table tr.me td { color: var(--accent); font-weight: bold; }
