@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdarg>
 #include <cstring>
 #include <map>
 
@@ -41,10 +42,75 @@ void Game::buildCarModel(CarModel& cm, const FSO& fso, const std::map<std::strin
     }
 }
 
-bool Game::start(const std::string& track, const std::string& carClass, const std::vector<std::string>& skinsIn,
-                 int opponents, int laps, float topSpeedKmh, const std::string& weather, const std::string& rolesIn) {
+bool parseRaceConfig(const std::string& s, RaceConfig& c) {
+    auto split = [](const std::string& str, char sep) {
+        std::vector<std::string> out;
+        size_t p = 0;
+        for (;;) {
+            size_t e = str.find(sep, p);
+            out.push_back(str.substr(p, e == std::string::npos ? std::string::npos : e - p));
+            if (e == std::string::npos) return out;
+            p = e + 1;
+        }
+    };
+    for (const std::string& kv : split(s, ';')) {
+        size_t eq = kv.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = kv.substr(0, eq), v = kv.substr(eq + 1);
+        if (k == "track") c.track = v;
+        else if (k == "weather") c.weather = v;
+        else if (k == "laps") c.laps = atoi(v.c_str());
+        else if (k == "time") c.seconds = (float)atof(v.c_str());
+        else if (k == "practice") c.practice = v == "1";
+        else if (k == "ghost") c.ghost = atoi(v.c_str());
+        else if (k == "cars") {
+            c.cars.clear();
+            for (const std::string& car : split(v, '|')) {
+                std::vector<std::string> f = split(car, ',');
+                if (f.size() < 4 || f[0].empty() || f[3].empty()) continue;
+                c.cars.push_back({f[0], f[1], (float)atof(f[2].c_str()), f[3][0]});
+            }
+        }
+    }
+    return !c.track.empty() && !c.cars.empty();
+}
+
+bool Game::start(const std::string& track, const std::string& carClass, const std::vector<std::string>& skins,
+                 int opponents, int laps, float topSpeedKmh, const std::string& weather) {
+    RaceConfig c;
+    c.track = track;
+    c.weather = weather;
+    c.laps = laps;
+    for (int i = 0; i <= std::max(0, opponents); i++)
+        c.cars.push_back({carClass, skins.empty() ? "" : skins[i % skins.size()], topSpeedKmh, i == 0 ? '0' : 'a'});
+    return start(c);
+}
+
+Game::CarModel* Game::carModel(const std::string& cls, const std::string& skinIn) {
+    auto it = carFsos_.find(cls);
+    if (it == carFsos_.end()) {
+        FSO f;
+        if (!loadFSO("cars/car_" + cls + ".fso", f)) { fprintf(stderr, "car fso failed: %s\n", cls.c_str()); return nullptr; }
+        it = carFsos_.emplace(cls, std::move(f)).first;
+    }
+    const FSO& fso = it->second;
+    // The skin replaces the class's default body texture: the one with the same name apart from the number.
+    std::string skin = lower(skinIn), baseSkin;
+    if (!skin.empty())
+        for (auto& m : fso.materials)
+            for (auto& tx : m.textures)
+                if (skinPrefix(tx) == skinPrefix(skin)) baseSkin = tx;
+    std::map<std::string, std::string> ov;
+    if (!baseSkin.empty()) ov[baseSkin] = skin;
+    auto cm = new CarModel();
+    buildCarModel(*cm, fso, ov);
+    return cm;
+}
+
+bool Game::start(const RaceConfig& cfgIn) {
     stop();
-    std::string t = lower(track);
+    cfg_ = cfgIn;
+    const std::string t = lower(cfg_.track), weather = cfg_.weather;
     if (t != trackName_ || lower(weather) != weatherName_) {
         Weather wx;
         std::map<std::string, std::string> swaps;
@@ -71,36 +137,25 @@ bool Game::start(const std::string& track, const std::string& carClass, const st
             gfx_.setFog(0.72f, 0.78f, 0.86f, 1e5f, 2e5f);
         gfx_.setTint(wx.light[0], wx.light[1], wx.light[2]);
     }
-    FSO carFso;
-    std::string cls = lower(carClass);
-    if (!loadFSO("cars/car_" + cls + ".fso", carFso)) { fprintf(stderr, "car fso failed\n"); return false; }
-    std::vector<std::string> skins;
-    for (auto& s : skinsIn) skins.push_back(lower(s));
-    std::string baseSkin;
-    if (!skins.empty()) {
-        std::string pre = skinPrefix(skins[0]);
-        for (auto& m : carFso.materials)
-            for (auto& tx : m.textures)
-                if (skinPrefix(tx) == pre) baseSkin = tx;
-    }
-    CarSpec spec;
-    spec.topSpeed = topSpeedKmh / 3.6f;
-    if (spec.topSpeed < 5) spec.topSpeed = 14;
-    spec.accel = 5.0f + spec.topSpeed * 0.35f;
-    spec.grip = cls.find("hop") != std::string::npos ? 1.35f : 1.2f;
-    if (cls == "monster") { spec.grip = 1.1f; spec.mass = 12; }
-    spec.steerMax = 0.5f;
-
-    std::string roles = rolesIn.empty() ? "0" + std::string(std::max(0, opponents), 'a') : rolesIn;
-    laps_ = std::max(1, laps);
-    int n = std::min((int)roles.size(), (int)meta_.grid.size());
+    laps_ = std::max(1, cfg_.laps);
+    timeUp_ = false;
+    minutesLeftSaid_ = 0;
+    int n = std::min((int)cfg_.cars.size(), (int)meta_.grid.size());
     for (int i = 0; i < n; i++) {
-        auto cm = std::make_unique<CarModel>();
-        std::map<std::string, std::string> ov;
-        if (!baseSkin.empty()) ov[baseSkin] = skins[i % skins.size()];
-        buildCarModel(*cm, carFso, ov);
+        const CarEntry& e = cfg_.cars[i];
+        std::string cls = lower(e.cls);
+        std::unique_ptr<CarModel> cm(carModel(cls, e.skin));
+        if (!cm) return false;
+        CarSpec spec;
+        spec.topSpeed = e.topSpeedKmh / 3.6f;
+        if (spec.topSpeed < 5) spec.topSpeed = 14;
+        spec.accel = 5.0f + spec.topSpeed * 0.35f;
+        spec.grip = cls.find("hop") != std::string::npos ? 1.35f : 1.2f;
+        if (cls == "monster") { spec.grip = 1.1f; spec.mass = 12; }
+        spec.steerMax = 0.5f;
         Racer r;
-        int slot = n - 1 - i;  // player starts at the back of the grid
+        r.cls = cls;
+        int slot = n - 1 - i;  // cars[0] starts at the back of the grid
         std::vector<V3> wc;
         float wr = 0.06f;
         for (int k = 0; k < 4; k++)
@@ -121,7 +176,7 @@ bool Game::start(const std::string& track, const std::string& carClass, const st
                 sph.push_back({c, sr});
             }
         }
-        char role = roles[i];
+        char role = e.role;
         r.player = role >= '0' && role < '0' + kMaxLocal ? role - '0' : -1;
         r.remote = role == 'r';
         r.ai = r.player < 0 && !r.remote;
@@ -150,6 +205,16 @@ bool Game::start(const std::string& track, const std::string& carClass, const st
         v.camMode = defaultCam_;
         players_.push_back(v);
     }
+    ghostModel_.reset();
+    ghostCur_ = GhostLap();
+    ghostVisible_ = false;
+    if (cfg_.ghost && !players_.empty() && racers_[players_[0].racer].player == 0) {
+        const Racer& p = racers_[players_[0].racer];
+        std::string key = t + "|" + p.cls;
+        if (key != ghostKey_) { ghostBest_ = ghostLast_ = GhostLap(); ghostKey_ = key; }  // laps on another track/car
+        ghostModel_.reset(carModel(p.cls, cfg_.cars[players_[0].racer].skin));
+        ghost_ = p;
+    }
     state_ = Countdown;
     countdown_ = 3.999f;
     lastCountdownSec_ = -1;
@@ -160,10 +225,37 @@ bool Game::start(const std::string& track, const std::string& carClass, const st
     return true;
 }
 
+static const float kGhostStep = 0.05f;  // seconds of lap time between recorded ghost frames
+
+void Game::updateGhost(float) {
+    ghostVisible_ = false;
+    if (players_.empty() || !ghostModel_) return;
+    const Racer& p = racers_[players_[0].racer];
+    if (p.player != 0 || p.lap < 1) return;
+    float lt = raceTime_ - p.lapStart;
+    // Record: one frame per kGhostStep of lap time (a lap that ran long is dropped, it won't be a best lap).
+    if (ghostCur_.frames.size() < 20 * 60 * 5 && (int)ghostCur_.frames.size() <= (int)(lt / kGhostStep)) {
+        std::vector<float> f(kSnapFloats);
+        packSnapshot(p, lt, f.data());
+        ghostCur_.frames.push_back(std::move(f));
+    }
+    // Replay the chosen lap at the same lap time.
+    const GhostLap& g = cfg_.ghost == 2 ? ghostLast_ : ghostBest_;
+    if (g.frames.size() < 2) return;
+    float x = lt / kGhostStep;
+    size_t i = (size_t)x;
+    if (i + 1 >= g.frames.size()) return;  // the ghost has already finished its lap
+    applySnapshot(ghost_, g.frames[i].data(), g.frames[i + 1].data(), x - (float)i);
+    ghostVisible_ = true;
+}
+
 void Game::stop() {
     racers_.clear();
     for (auto& cm : carModels_) gfx_.release(cm->model);
     carModels_.clear();
+    if (ghostModel_) gfx_.release(ghostModel_->model);
+    ghostModel_.reset();
+    ghostVisible_ = false;
     snaps_.clear();
     players_.clear();
     waiting = false;
@@ -215,30 +307,69 @@ void Game::stepPhysics(float dt) {
         }
 }
 
-void Game::updateRace(float) {
+void Game::emitf(const char* fmt, ...) {
+    char buf[96];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    emit(buf);
+}
+
+// Called when the racer crosses the start/finish line in the right order.
+void Game::finishLap(Racer& r) {
+    bool ghostCar = cfg_.ghost && r.player == 0;
+    if (r.lap > 0) {
+        r.lastLap = raceTime_ - r.lapStart;
+        if (r.bestLap == 0 || r.lastLap < r.bestLap) r.bestLap = r.lastLap;
+        if (r.player >= 0 && !r.finished) emitf("laptime:%d:%.3f", r.player, r.lastLap);  // not autopilot laps
+        if (ghostCar && !ghostCur_.frames.empty()) {
+            ghostCur_.time = r.lastLap;
+            if (ghostBest_.frames.empty() || ghostCur_.time < ghostBest_.time) ghostBest_ = ghostCur_;
+            ghostLast_ = ghostCur_;
+        }
+    }
+    if (ghostCar) ghostCur_.frames.clear();
+    r.lapStart = raceTime_;
+    r.lap++;
+    if (r.finished) return;
+    bool done = cfg_.practice ? false : cfg_.seconds > 0 ? timeUp_ && r.lap > 1 : r.lap > laps_;
+    if (done) {
+        r.finished = true;
+        r.finishTime = raceTime_;
+        if (r.player >= 0) emitf("finish:%d", r.player);
+    } else if (r.player >= 0 && r.lap > 1) {
+        emitf("%s:%d", cfg_.seconds <= 0 && !cfg_.practice && r.lap == laps_ ? "lastlap" : "lap", r.player);
+    }
+}
+
+// Local players get told when they cut past a checkpoint or cross one out of order.
+void Game::checkpointWarnings(Racer& r, float dt) {
+    r.cpWarnTime = std::max(0.0f, r.cpWarnTime - dt);
+    const int ncp = (int)meta_.checkpoints.size();
+    if (r.player < 0 || r.finished || ncp < 3) return;
+    for (int g = 0; g < ncp; g++) {
+        if (g == r.nextCp || g == (r.nextCp + ncp - 1) % ncp) continue;  // the expected one, or the one just passed
+        if (!crossed(r.prevPos, r.car.pos, meta_.checkpoints[g])) continue;
+        if (r.cpWarnTime > 0) return;
+        r.cpWarnTime = 2.5f;
+        int ahead = (g - r.nextCp + ncp) % ncp;
+        emitf("%s:%d", ahead <= ncp / 2 ? "missedcp" : "wrongcp", r.player);
+        return;
+    }
+}
+
+void Game::updateRace(float dt) {
     const int ncp = (int)meta_.checkpoints.size();
     for (size_t i = 0; i < racers_.size(); i++) {
         Racer& r = racers_[i];
-        if (!r.remote && crossed(r.prevPos, r.car.pos, meta_.checkpoints[r.nextCp])) {
-            if (r.nextCp == 0) {
-                if (r.lap > 0) {
-                    r.lastLap = raceTime_ - r.lapStart;
-                    if (r.bestLap == 0 || r.lastLap < r.bestLap) r.bestLap = r.lastLap;
-                }
-                r.lapStart = raceTime_;
-                r.lap++;
-                char ev[32];
-                if (r.lap > laps_ && !r.finished) {
-                    r.finished = true;
-                    r.finishTime = raceTime_;
-                    snprintf(ev, sizeof ev, "finish:%d", r.player);
-                    if (r.player >= 0) emit(ev);
-                } else if (r.player >= 0 && r.lap > 1 && !r.finished) {
-                    snprintf(ev, sizeof ev, "%s:%d", r.lap == laps_ ? "lastlap" : "lap", r.player);
-                    emit(ev);
-                }
+        if (!r.remote) {
+            if (crossed(r.prevPos, r.car.pos, meta_.checkpoints[r.nextCp])) {
+                if (r.nextCp == 0) finishLap(r);
+                r.nextCp = (r.nextCp + 1) % ncp;
+            } else {
+                checkpointWarnings(r, dt);
             }
-            r.nextCp = (r.nextCp + 1) % ncp;
         }
         r.prevPos = r.car.pos;
     }
@@ -255,6 +386,7 @@ void Game::updateRace(float) {
         const Racer& A = racers_[a];
         const Racer& B = racers_[b];
         if (A.finished != B.finished) return A.finished;
+        if (A.finished && A.lap != B.lap) return A.lap > B.lap;  // timed race: more laps beats an earlier finish
         if (A.finished) return A.finishTime < B.finishTime;
         if (A.gone != B.gone) return B.gone;  // left without finishing: last
         return score(A) > score(B);
@@ -279,6 +411,18 @@ void Game::update(float dt, const Input* in, int numInputs) {
         if (countdown_ <= 0) state_ = Racing;
     } else if (state_ != Countdown) {
         raceTime_ += dt;
+    }
+    if (cfg_.seconds > 0 && state_ == Racing && !cfg_.practice) {
+        float left = cfg_.seconds - raceTime_;
+        for (int m = 3; m >= 1; m--)  // "3/2/1 minutes left", unless the race is barely longer than that
+            if (left <= m * 60 && (minutesLeftSaid_ == 0 || minutesLeftSaid_ > m) && cfg_.seconds > m * 60 + 5) {
+                minutesLeftSaid_ = m;
+                emitf("timeleft:%d", m);
+            }
+        if (left <= 0 && !timeUp_) {
+            timeUp_ = true;
+            emit("timeup");
+        }
     }
     const int ncp = (int)meta_.checkpoints.size();
     for (size_t i = 0; i < racers_.size(); i++) {
@@ -308,6 +452,14 @@ void Game::update(float dt, const Input* in, int numInputs) {
             r.needsReset = false;
             placeOnLine(r);
         }
+        // A car stopped or on its roof mid-race: the announcer warns about it (once per incident).
+        bool stalled = state_ == Racing && !r.finished && (r.flipTime > 0 || std::fabs(r.car.speed()) < 0.3f);
+        r.slowTime = stalled ? r.slowTime + dt : 0;
+        if (r.slowTime > 0.8f && !r.deadReported && raceTime_ > 3) {
+            r.deadReported = true;
+            emitf("deadcar:%d", r.player);
+        }
+        if (r.slowTime == 0) r.deadReported = false;
     }
     accum_ += dt;
     const float step = 1.0f / 240.0f;
@@ -319,6 +471,7 @@ void Game::update(float dt, const Input* in, int numInputs) {
         accum_ -= step;
     }
     if (state_ != Countdown) updateRace(dt);
+    if (cfg_.ghost) updateGhost(dt);
     bool allDone = true, anyLocal = false;
     for (auto& v : players_) {
         const Racer& r = racers_[v.racer];
@@ -382,6 +535,13 @@ void Game::draw() {
         M4 body = racers_[i].car.bodyMatrix();
         for (Part* p : carModels_[i]->parts) gfx_.drawPart(*p, body, Pass::Blend);
     }
+    if (ghostVisible_) {  // translucent, after everything else so the track shows through it
+        M4 body = ghost_.car.bodyMatrix();
+        for (Part* p : ghostModel_->parts) gfx_.drawPart(*p, body, Pass::Blend, 0.5f);
+        for (int w = 0; w < 4 && w < (int)ghost_.car.wheels.size(); w++)
+            if (ghostModel_->wheel[w])
+                gfx_.drawPart(*ghostModel_->wheel[w], ghost_.car.wheelMatrix(w, ghostModel_->wheelCentre[w]), Pass::Blend, 0.5f);
+    }
     if (debugLines) {
         std::vector<float> l;
         auto add = [&](const V3& a, const V3& b) { l.insert(l.end(), {a.x, a.y, a.z + 0.05f, b.x, b.y, b.z + 0.05f}); };
@@ -412,10 +572,14 @@ std::string Game::hudJson(int pl) const {
     int cd = state_ == Countdown ? (int)std::ceil(countdown_) : 0;
     snprintf(buf, sizeof buf,
              "{\"speed\":%.1f,\"lap\":%d,\"laps\":%d,\"place\":%d,\"racers\":%d,\"time\":%.2f,\"lapTime\":%.2f,"
-             "\"best\":%.2f,\"last\":%.2f,\"countdown\":%d,\"state\":%d,\"finished\":%s,\"cam\":%d,\"waiting\":%s}",
-             std::fabs(p.car.speed()) * 3.6f, std::max(1, std::min(p.lap, laps_)), laps_, p.place, (int)racers_.size(),
+             "\"best\":%.2f,\"last\":%.2f,\"countdown\":%d,\"state\":%d,\"finished\":%s,\"cam\":%d,\"waiting\":%s,"
+             "\"timeLeft\":%.2f,\"practice\":%s,\"rpm\":%.2f,\"top\":%.1f}",
+             std::fabs(p.car.speed()) * 3.6f, std::max(1, cfg_.seconds > 0 || cfg_.practice ? p.lap : std::min(p.lap, laps_)),
+             cfg_.seconds > 0 || cfg_.practice ? 0 : laps_, p.place, (int)racers_.size(),
              raceTime_, p.lap > 0 ? raceTime_ - p.lapStart : 0.0f, p.bestLap, p.lastLap, cd, (int)state_,
-             p.finished ? "true" : "false", players_[pl].camMode, waiting ? "true" : "false");
+             p.finished ? "true" : "false", players_[pl].camMode, waiting ? "true" : "false",
+             cfg_.seconds > 0 ? std::max(0.0f, cfg_.seconds - raceTime_) : -1.0f, cfg_.practice ? "true" : "false",
+             p.car.rpm, p.car.spec.topSpeed * 3.6f);
     return buf;
 }
 
@@ -426,13 +590,13 @@ std::string Game::resultsJson() const {
     std::sort(rs.begin(), rs.end(), [](const Racer* a, const Racer* b) { return a->place < b->place; });
     for (size_t i = 0; i < rs.size(); i++) {
         const Racer& r = *rs[i];
-        char b[256];
+        char b[320];
         snprintf(b, sizeof b,
                  "%s{\"i\":%d,\"player\":%s,\"human\":%d,\"remote\":%s,\"gone\":%s,\"place\":%d,\"finished\":%s,"
-                 "\"time\":%.2f,\"best\":%.2f,\"lap\":%d}",
+                 "\"time\":%.2f,\"best\":%.2f,\"lap\":%d,\"cls\":\"%s\"}",
                  i ? "," : "", (int)(rs[i] - racers_.data()), r.player >= 0 ? "true" : "false", r.player,
                  r.remote ? "true" : "false", r.gone ? "true" : "false", r.place, r.finished ? "true" : "false",
-                 r.finishTime, r.bestLap, r.lap);
+                 r.finishTime, r.bestLap, std::max(0, r.lap - 1), r.cls.c_str());
         out += b;
     }
     return out + "]";

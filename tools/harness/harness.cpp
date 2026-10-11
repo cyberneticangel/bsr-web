@@ -3,6 +3,8 @@
 //
 // usage: harness <data dir> <track> <class> <out dir> <race seconds> [shot times...]
 //        options via env: CAM=0|1|2, OPP=n, LAPS=n, TOP=kmh, SKINS=a,b,c
+//        TIME=s (timed race), PRACTICE=1, GHOST=1|2, CLASSES=a,b (AI classes, open race)
+//        STOP_AT=s      the player brakes to a stop at s (e.g. to watch the ghost drive on)
 //        CHAOS=seed     the player drives erratically (crashes, flips) instead of on autopilot
 //        SHOTCLIP=m     screenshot whenever the player's drawn body is more than m metres inside the ground
 //        Prints bodyClip/wheelClip: frames in which any car's drawn body/wheels were inside the ground.
@@ -122,7 +124,28 @@ int main(int argc, char** argv) {
     int laps = getenv("LAPS") ? atoi(getenv("LAPS")) : 3;
     float top = getenv("TOP") ? (float)atof(getenv("TOP")) : 58;
     std::string wx = getenv("WEATHER") ? getenv("WEATHER") : "sunny_bluesky_summer";
-    if (!game.start(track, cls, skins, opp, laps, top, wx)) { fprintf(stderr, "start failed\n"); return 1; }
+    RaceConfig cfg;
+    cfg.track = track;
+    cfg.weather = wx;
+    cfg.laps = laps;
+    cfg.seconds = getenv("TIME") ? (float)atof(getenv("TIME")) : 0;
+    cfg.practice = getenv("PRACTICE") != nullptr;
+    cfg.ghost = getenv("GHOST") ? atoi(getenv("GHOST")) : 0;
+    // CLASSES=a,b,c: classes for the AI cars, cycling (open race)
+    std::vector<std::string> classes;
+    std::string cl = getenv("CLASSES") ? getenv("CLASSES") : "";
+    for (size_t p = 0; p < cl.size();) {
+        size_t e = cl.find(',', p);
+        if (e == std::string::npos) e = cl.size();
+        classes.push_back(cl.substr(p, e - p));
+        p = e + 1;
+    }
+    for (int i = 0; i <= opp; i++) {
+        std::string c = i > 0 && !classes.empty() ? classes[(i - 1) % classes.size()] : cls;
+        cfg.cars.push_back({c, skins.empty() ? "" : skins[i % skins.size()], i > 0 && !classes.empty() ? 60.0f : top,
+                            i == 0 ? '0' : 'a'});
+    }
+    if (!game.start(cfg)) { fprintf(stderr, "start failed\n"); return 1; }
 
     const float dt = 1.0f / 60.0f;
     size_t nextShot = 0;
@@ -154,6 +177,11 @@ int main(int argc, char** argv) {
             in.brake = in.throttle == 0 ? 1.0f : 0.0f;
             in.steer = rnd() * 2 - 1;
             in.handbrake = rnd() < 0.15f;
+        }
+        if (getenv("STOP_AT") && t >= (float)atof(getenv("STOP_AT")) && game.autopilot) {  // player stops dead
+            game.autopilot = false;
+            in = Input();
+            in.brake = 1;
         }
         game.update(dt, in);
         for (size_t i = 0; i < game.racers().size(); i++) {

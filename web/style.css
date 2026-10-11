@@ -25,6 +25,8 @@ h2 { margin: 0 0 16px; color: var(--accent); text-align: center; letter-spacing:
 .choices button.sel { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .skins button { width: 34px; padding: 6px 0; }
 select, input[type=range] { flex: 1; min-width: 140px; }
+#row-length .choices { flex: 0 0 auto; }
+#len-laps { display: flex; flex: 1; gap: 12px; align-items: center; min-width: 140px; }
 input[type=text] { flex: 1; min-width: 90px; background: #1c2028; color: var(--fg); border: 1px solid #3a404a;
   border-radius: 6px; padding: 7px 8px; font: inherit; font-size: 14px; }
 #net-code { flex: 0 0 82px; min-width: 0; text-transform: uppercase; letter-spacing: 2px; }

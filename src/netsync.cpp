@@ -38,6 +38,29 @@ void packSnapshot(const Racer& r, float clock, float* o) {
     o[kSnapSkid] = c.skid;
 }
 
+void applySnapshot(Racer& r, const float* a, const float* b, float t, float extra) {
+    Car& c = r.car;
+    Q qa{a[kSnapQuat], a[kSnapQuat + 1], a[kSnapQuat + 2], a[kSnapQuat + 3]};
+    Q qb{b[kSnapQuat], b[kSnapQuat + 1], b[kSnapQuat + 2], b[kSnapQuat + 3]};
+    c.pos = mix(a + kSnapPos, b + kSnapPos, t);
+    c.R = Q::nlerp(qa, qb, t).toM3();
+    c.vel = mix(a + kSnapVel, b + kSnapVel, t);
+    c.angVel = mix(a + kSnapAngVel, b + kSnapAngVel, t);
+    if (extra > 0) {
+        c.pos += c.vel * extra;
+        c.R.rotate(c.angVel, extra);
+    }
+    for (size_t i = 0; i < c.wheels.size() && i < 4; i++) {
+        Wheel& w = c.wheels[i];
+        w.steer = w.front ? lerpf(a[kSnapSteer], b[kSnapSteer], t) : 0;
+        w.comp = lerpf(a[kSnapComp + i], b[kSnapComp + i], t);
+        w.spin = lerpf(a[kSnapSpin + i], b[kSnapSpin + i], t);
+    }
+    c.rpm = lerpf(a[kSnapRpm], b[kSnapRpm], t);
+    c.skid = lerpf(a[kSnapSkid], b[kSnapSkid], t);
+    c.impact = 0;
+}
+
 void SnapshotBuffer::push(const float* d, double now) {
     for (int i = 0; i < kSnapFloats; i++)
         if (!std::isfinite(d[i])) return;
@@ -71,26 +94,7 @@ bool SnapshotBuffer::apply(Racer& r, double now) const {
         float span = b[kSnapTime] - a[kSnapTime];
         t = span > 1e-6f ? clampf((float)(rt - a[kSnapTime]) / span, 0, 1) : 1;
     }
-    Car& c = r.car;
-    Q qa{a[kSnapQuat], a[kSnapQuat + 1], a[kSnapQuat + 2], a[kSnapQuat + 3]};
-    Q qb{b[kSnapQuat], b[kSnapQuat + 1], b[kSnapQuat + 2], b[kSnapQuat + 3]};
-    c.pos = mix(a + kSnapPos, b + kSnapPos, t);
-    c.R = Q::nlerp(qa, qb, t).toM3();
-    c.vel = mix(a + kSnapVel, b + kSnapVel, t);
-    c.angVel = mix(a + kSnapAngVel, b + kSnapAngVel, t);
-    if (extra > 0) {
-        c.pos += c.vel * extra;
-        c.R.rotate(c.angVel, extra);
-    }
-    for (size_t i = 0; i < c.wheels.size() && i < 4; i++) {
-        Wheel& w = c.wheels[i];
-        w.steer = w.front ? lerpf(a[kSnapSteer], b[kSnapSteer], t) : 0;
-        w.comp = lerpf(a[kSnapComp + i], b[kSnapComp + i], t);
-        w.spin = lerpf(a[kSnapSpin + i], b[kSnapSpin + i], t);
-    }
-    c.rpm = lerpf(a[kSnapRpm], b[kSnapRpm], t);
-    c.skid = lerpf(a[kSnapSkid], b[kSnapSkid], t);
-    c.impact = 0;
+    applySnapshot(r, a, b, t, extra);
     // Race progress as reported by the owner (it sees every checkpoint crossing; we only see samples).
     r.lap = (int)a[kSnapLap];
     r.nextCp = (int)a[kSnapNextCp];

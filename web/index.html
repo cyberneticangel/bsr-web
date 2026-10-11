@@ -13,10 +13,10 @@
   <div class="hud-view" id="hud-p1">
     <div class="hud-tl">
       <div class="pos"><span id="h-place">1</span><small>/<span id="h-racers">1</span></small></div>
-      <div class="lap">LAP <span id="h-lap">1</span>/<span id="h-laps">3</span></div>
+      <div class="lap">LAP <span id="h-lap">1</span><span id="h-lapsof">/<span id="h-laps">3</span></span></div>
     </div>
     <div class="hud-tr">
-      <div>TIME <span id="h-time">0:00.00</span></div>
+      <div><span id="h-timelabel">TIME</span> <span id="h-time">0:00.00</span></div>
       <div>LAP <span id="h-laptime">0:00.00</span></div>
       <div>BEST <span id="h-best">-:--.--</span></div>
     </div>
@@ -28,10 +28,10 @@
   <div class="hud-view" id="hud-p2">
     <div class="hud-tl">
       <div class="pos"><span id="h2-place">1</span><small>/<span id="h2-racers">1</span></small></div>
-      <div class="lap">LAP <span id="h2-lap">1</span>/<span id="h2-laps">3</span></div>
+      <div class="lap">LAP <span id="h2-lap">1</span><span id="h2-lapsof">/<span id="h2-laps">3</span></span></div>
     </div>
     <div class="hud-tr">
-      <div>TIME <span id="h2-time">0:00.00</span></div>
+      <div><span id="h2-timelabel">TIME</span> <span id="h2-time">0:00.00</span></div>
       <div>LAP <span id="h2-laptime">0:00.00</span></div>
       <div>BEST <span id="h2-best">-:--.--</span></div>
     </div>
@@ -54,7 +54,7 @@
   <h1>BIG SCALE RACING</h1>
   <p class="sub">WebAssembly port · original BumbleBeast data</p>
   <div class="row"><label>Mode</label><div id="modes" class="choices">
-    <button data-v="single">Single</button><button data-v="split">Split screen</button><button data-v="online">Online</button>
+    <button data-v="single">Quick race</button><button data-v="practice">Practice</button><button data-v="split">Split screen</button><button data-v="online">Online</button>
   </div></div>
   <div id="online" class="hidden">
     <div id="online-join">
@@ -73,8 +73,18 @@
   <div class="row"><label>Weather</label><select id="weather"></select></div>
   <div class="row"><label id="skin-label">Skin</label><div id="skins" class="choices skins"></div></div>
   <div class="row hidden" id="row-skin2"><label>P2 skin</label><div id="skins2" class="choices skins"></div></div>
-  <div class="row"><label id="opp-label">Opponents</label><input id="opp" type="range" min="0" max="7" value="5"><span id="opp-v">5</span></div>
-  <div class="row"><label>Laps</label><input id="laps" type="range" min="1" max="10" value="3"><span id="laps-v">3</span></div>
+  <div class="row" id="row-racetype"><label>Race type</label><div id="racetype" class="choices">
+    <button data-v="cup" title="Only opponents of your class">Cup race</button><button data-v="open" title="Opponents from all classes">Open race</button>
+  </div></div>
+  <div class="row" id="row-opp"><label id="opp-label">Opponents</label><input id="opp" type="range" min="0" max="7" value="5"><span id="opp-v">5</span></div>
+  <div class="row" id="row-length"><label>Length</label><div id="lenmode" class="choices">
+    <button data-v="laps">Laps</button><button data-v="time">Time</button></div>
+    <span id="len-laps" class="len"><input id="laps" type="range" min="1" max="10" value="3"><span id="laps-v">3</span></span>
+    <select id="minutes" class="len"><option value="1">1 min</option><option value="2">2 min</option><option value="3" selected>3 min</option>
+      <option value="5">5 min</option><option value="10">10 min</option><option value="20">20 min</option></select>
+  </div>
+  <div class="row hidden" id="row-ghost"><label>Ghost</label><div id="ghost" class="choices">
+    <button data-v="0">Off</button><button data-v="1">Best lap</button><button data-v="2">Last lap</button></div></div>
   <div class="row"><label>Music</label><input id="music" type="checkbox" checked></div>
   <button id="go" class="big">RACE</button>
   <div id="status"></div>

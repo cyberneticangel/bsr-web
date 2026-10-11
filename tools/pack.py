@@ -23,12 +23,18 @@ CLASSES = ['junior_std', 'junior_hop', 'trained_std', 'trained_hop', 'skilled_st
            'expert_std', 'expert_hop', 'pro_std', 'pro_hop', 'Monster']
 SOUNDS = ['FX_Engine_st_22_ZENOAH_A', 'FX_Engine_st_22_serpent_A', 'FX_tire_slip_A', 'FX_auto_botst_b',
           'FX_auto_botst_c', 'AU_FX_botst_alg_A', 'FX_TireWall_A', 'FX_horn_finish_22_mo_A', 'FX_false_start',
-          'FX_env_crowd_gen_A_22', 'FX_Comment_racestart_in_3_seconds_A_MW', 'FX_Comment_finish_number_1_A_MW',
-          'FX_Comment_race_over_D_MW', 'menu_action', 'menu_updown', 'FX_RCdrivetrain_A_44']
+          'FX_env_crowd_gen_A_22', 'menu_action', 'menu_updown', 'menu_leftright', 'FX_RCdrivetrain_A_44', 'FX_WARNING',
+          'FX_tire_skid_K', 'FX_env_crowd_applause_22', 'FX_weather_rain_steady_A', 'FX_weather_rain_heavy',
+          'FX_weather_rain_light', 'FX_weather_thunder_close_A', 'FX_weather_thunder_far_A',
+          'FX_weather_thunder_very_far_A', 'FX_weather_thunder_nearby']
+SOUND_PREFIXES = ['FX_Comment_']  # every announcer line (three voices: IJB, MW, PS)
 WEATHER = {'Sunny': 'sunny_bluesky_summer', 'Summer haze': 'sunny_neut_clouds_summer', 'Sunset': 'sunset_orange',
            'Cloudy': 'cloudy_partly_NW_NR_NT', 'Foggy': 'cloudy_gray_foggy_NW_NR_NT', 'Wet': 'wet_neutral_A'}
-MUSIC = ['music_bsr_take3a.fs3', 'music_bsr_take5.fs3', 'bsr_Track02.fs3', 'bsr_Track06.fs3',
-         'BSR_edge_Track01.fs3', 'BSR_edge_Track07.fs3', 'BSR_night_Track05.fs3']
+# Data/Music.ini: music per game state, and three genres of on-track music. Every on-track song exists as
+# .fs3 (stereo MP3) and .fsw (mono 11 kHz WAV, for "localized" music played from the trackside speakers).
+MUSIC_STATES = {'menu': 'music_bsr_take3a', 'finish': 'music_bsr_take5', 'podium': '61 Track61',
+                'nopodium': '62 Track62'}
+MUSIC_GENRES = {'surf': r'bsr_track\d+', 'rock': r'bsr_edge_track\d+', 'dance': r'bsr_night_track\d+'}
 
 
 def main(data, web):
@@ -83,16 +89,32 @@ def main(data, web):
                     common.update(fl)
                     break
         manifest['classes'][c] = {'skins': skins}
-    for s in SOUNDS:
-        cands = [r for r in by_base.get(s.lower(), []) if r.endswith('.fsw')]
+    names = list(SOUNDS)
+    for rel in sorted(index):
+        base = os.path.basename(index[rel]).rsplit('.', 1)[0]
+        if rel.startswith('audio/') and rel.endswith('.fsw') and any(base.startswith(p) for p in SOUND_PREFIXES):
+            names.append(base)
+    for s in names:
+        cands = [r for r in by_base.get(s.lower(), []) if r.startswith('audio/') and r.endswith('.fsw')]
         if cands:
             manifest['sounds'][s] = cands[0]
             used.add(cands[0])
-    for m in MUSIC:
-        rel = 'music/' + m.lower()
+    music = {}
+    for state, base in MUSIC_STATES.items():
+        rel = 'music/%s.fs3' % base.lower()
         if rel in index:
-            manifest['music'].append(rel)
+            music[state] = rel
             used.add(rel)
+    for genre, pat in MUSIC_GENRES.items():
+        songs = []
+        for rel in sorted(index):
+            m = re.fullmatch(r'music/(%s)\.fs3' % pat, rel)
+            wav = m and 'music/%s.fsw' % m.group(1)
+            if m and wav in index:
+                songs.append({'mp3': rel, 'wav': wav})
+                used.update((rel, wav))
+        music[genre] = songs
+    manifest['music'] = music
     for t in TRACKS:
         files = set()
         for suf in ('_high.fso', '_high.fst', '_meta.fso', '.bin'):

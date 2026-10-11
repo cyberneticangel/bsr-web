@@ -1,6 +1,7 @@
 // Integration test of the browser layer in Node: real bsr.js/bsr.wasm/game.js with stubbed DOM, WebGL2 and
 // Web Audio. Exercises menu building, data fetch into MEMFS, bsr_start, the main loop, HUD/events and audio decoding.
-// usage: node tools/nodetest.js [track] [class] [seconds]
+// usage: node tools/nodetest.js [track] [class] [seconds] [variant]
+//        variant: race (default, 1 lap), time (1-minute timed race), practice (ghost, no AI), open (mixed classes)
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -10,6 +11,7 @@ const WEB = path.join(__dirname, '..', 'web');
 const track = process.argv[2] || 'baanbreker';
 const cls = process.argv[3] || 'pro_std';
 const seconds = +(process.argv[4] || 8);
+const variant = process.argv[5] || 'race';
 
 // ---- fake DOM
 const elements = {};
@@ -136,7 +138,11 @@ function fail(msg) { console.error('FAIL:', msg); process.exit(1); }
   for (let i = 0; i < 200 && !ctx.document.getElementById('cls').children.length; i++) await new Promise((r) => setTimeout(r, 50));
   if (!el('cls').children.length) fail('menu not built (manifest/bsr_init) status=' + el('status').innerHTML);
   console.log('menu ok: tracks=%d classes=%d weather=%d', el('tracks').children.length, el('cls').children.length, el('weather').children.length);
-  await ctx.__startRace({ track, cls, skin: 1, opponents: 5, laps: 1, weather: 'sunset_orange' });
+  const opts = { track, cls, skin: 1, opponents: 5, laps: 1, weather: 'sunset_orange' };
+  if (variant === 'time') Object.assign(opts, { laps: 0, minutes: 1 });
+  if (variant === 'practice') Object.assign(opts, { practice: true, ghost: 1 });
+  if (variant === 'open') Object.assign(opts, { raceType: 'open', opponents: 7 });
+  await ctx.__startRace(opts);
   if (/Error/.test(el('status').innerHTML)) fail('startRace: ' + el('status').innerHTML);
   if (!el('menu').classList.contains('hidden')) fail('menu still visible after start');
   // Drive the main loop with simulated time (Emscripten uses requestAnimationFrame + performance.now).
@@ -162,7 +168,25 @@ function fail(msg) { console.error('FAIL:', msg); process.exit(1); }
   if (drawCalls < 100) fail('too few draw calls');
   if (!events.includes('go')) fail('race never started');
   if (!(last.speed > 5)) fail('player car not moving');
-  if (seconds > 40 && !events.some((e) => e.startsWith('finish'))) fail('race not finished');
+  const finished = events.some((e) => e.startsWith('finish'));
+  if (variant === 'race' && seconds > 40 && !finished) fail('race not finished');
+  if (variant === 'time') {
+    if (!events.includes('timeup')) fail('timed race: no timeup event');
+    if (seconds > 100 && !finished) fail('timed race not finished');
+    if (!(last.timeLeft >= 0)) fail('timed race: no timeLeft in HUD');
+  }
+  if (variant === 'practice') {
+    if (finished) fail('practice finished');
+    if (last.racers !== 1) fail('practice has opponents: ' + last.racers);
+    if (!last.practice) fail('HUD not in practice mode');
+  }
+  if (variant === 'open') {
+    const res = JSON.parse(M.ccall('bsr_results', 'string', [], []));
+    const classes = new Set(res.map((r) => r.cls));
+    console.log('open race classes:', [...classes].join(','));
+    if (classes.size < 2) fail('open race has a single class');
+  }
+  if (!events.some((e) => e.startsWith('laptime:0:'))) console.log('note: no laptime event');
   console.log('PASS');
   process.exit(0);
 })().catch((e) => fail(e.stack || e));

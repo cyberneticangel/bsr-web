@@ -29,6 +29,8 @@ enum : int {
 
 // clock: sender time in seconds (any origin; the receiver estimates the offset).
 void packSnapshot(const Racer& r, float clock, float* out);
+// Poses the car between snapshots a and b (t in 0..1), then moves it on for `extra` seconds at its velocity.
+void applySnapshot(Racer& r, const float* a, const float* b, float t, float extra = 0);
 
 // Buffers the snapshots of one remote car and replays them slightly in the past, interpolated, so that
 // network jitter doesn't show as stutter.

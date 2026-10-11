@@ -1,5 +1,6 @@
 // Platform-independent game: track/car loading, race logic, camera and drawing.
 #pragma once
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -18,10 +19,28 @@ struct Input {
 };
 
 struct Callbacks {
-    // player: local player index (split-screen). Per-player events are named "<event>:<player>".
+    // player: local player index (split-screen). Per-player events are named "<event>:<player>[:<value>]".
     void (*audio)(int player, float rpm, float throttle, float skid, float impact, float speed) = nullptr;
     void (*event)(const char* name) = nullptr;
 };
+
+struct CarEntry {
+    std::string cls;          // car class: cars/car_<cls>.fso
+    std::string skin;         // body texture
+    float topSpeedKmh = 50;
+    char role = 'a';          // '0'/'1' local human player, 'a' AI simulated here, 'r' remote (network snapshots)
+};
+
+struct RaceConfig {
+    std::string track, weather = "sunny_bluesky_summer";
+    std::vector<CarEntry> cars;  // grid order: cars[0] starts at the back
+    int laps = 3;                // lap race (ignored when seconds > 0)
+    float seconds = 0;           // timed race: once time is up, each car finishes at its next line crossing
+    bool practice = false;       // no finish: laps run until the player quits
+    int ghost = 0;               // ghost car replaying the player's 1 best lap, 2 last lap (0 off)
+};
+// Parses "track=mach;weather=...;laps=3;time=0;practice=0;ghost=0;cars=cls,skin,top,role|cls,skin,top,role|..."
+bool parseRaceConfig(const std::string& s, RaceConfig& out);
 
 class Game {
 public:
@@ -29,11 +48,10 @@ public:
     static const int kMaxLocal = 2;
 
     bool init();
-    // roles: one character per racer, in grid order (racer 0 starts at the back):
-    //   '0'/'1' local human player, 'a' AI simulated here, 'r' remote car driven by network snapshots.
-    // Empty means one local player plus `opponents` AI cars. skins are assigned to racers in order (cycling).
+    bool start(const RaceConfig& cfg);
+    // Single class, one local player plus `opponents` AI cars (tests). skins are assigned in order, cycling.
     bool start(const std::string& track, const std::string& carClass, const std::vector<std::string>& skins,
-               int opponents, int laps, float topSpeedKmh, const std::string& weather, const std::string& roles = "");
+               int opponents, int laps, float topSpeedKmh, const std::string& weather);
     void stop();
     void update(float dt, const Input* in, int numInputs);  // in[p] drives local player p
     void update(float dt, const Input& in) { update(dt, &in, 1); }
@@ -86,6 +104,11 @@ private:
     void stepPhysics(float dt);
     void updateRace(float dt);
     void emit(const char* e) { if (cb.event) cb.event(e); }
+    void emitf(const char* fmt, ...);
+    void finishLap(Racer& r);
+    void checkpointWarnings(Racer& r, float dt);
+    void updateGhost(float dt);
+    CarModel* carModel(const std::string& cls, const std::string& skin);
 
     Renderer gfx_;
     std::string trackName_, weatherName_;
@@ -98,7 +121,18 @@ private:
     std::vector<Racer> racers_;
     std::vector<SnapshotBuffer> snaps_;  // per racer; used by remote racers only
     std::vector<View> players_;          // local human players, in player order
+    RaceConfig cfg_;
+    std::map<std::string, FSO> carFsos_;  // per class, for this race
     int laps_ = 3;
+    bool timeUp_ = false;
+    int minutesLeftSaid_ = 0;
+    // Ghost: the player's laps recorded as snapshots every kGhostStep seconds of lap time.
+    struct GhostLap { std::vector<std::vector<float>> frames; float time = 0; };
+    GhostLap ghostCur_, ghostBest_, ghostLast_;
+    std::string ghostKey_;  // track|class the stored laps belong to
+    std::unique_ptr<CarModel> ghostModel_;
+    Racer ghost_;
+    bool ghostVisible_ = false;
     float raceTime_ = 0, countdown_ = 0, accum_ = 0, camDt_ = 0;
     double now_ = 0;
     State state_ = Idle;

@@ -49,6 +49,10 @@ struct Racer {
     bool needsReset = false;
     int resets = 0;         // respawns on the racing line (diagnostics)
     int skin = 0;
+    std::string cls;        // car class
+    float cpWarnTime = 0;   // cooldown for missed/wrong checkpoint warnings
+    float slowTime = 0;     // stopped or upside down while racing
+    bool deadReported = false;
     V3 prevPos;
     int place = 0;
 };

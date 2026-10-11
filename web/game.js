@@ -7,13 +7,15 @@ const CLASS_NAMES = {
   skilled_std: 'Skilled', skilled_hop: 'Skilled Hop-up', expert_std: 'Expert', expert_hop: 'Expert Hop-up',
   pro_std: 'Pro', pro_hop: 'Pro Hop-up', Monster: 'Monster Truck',
 };
+const className = (c) => CLASS_NAMES[Object.keys(CLASS_NAMES).find((k) => k.toLowerCase() === String(c).toLowerCase())] || c;
 const params = new URLSearchParams(location.search);
 const $ = (id) => document.getElementById(id);
 const MAX_RACERS = 8;  // grid slots on every track
 
 let manifest = null;
 const loaded = new Set();
-const sel = { mode: 'single', track: 'baanbreker', cls: 'pro_std', skin: 0, skin2: 1 };
+const sel = { mode: 'single', track: 'baanbreker', cls: 'pro_std', skin: 0, skin2: 1, raceType: 'cup', lenMode: 'laps', ghost: 1 };
+const RACE_MINUTES = [1, 2, 3, 5, 10, 20];
 let lastRace = null;
 let race = null;  // current race: { opts, count, local, names, finished }
 const hudStates = [{}, {}];
@@ -28,6 +30,7 @@ function xorInPlace(u8, start = 0) {
 const Audio = {
   ctx: null, buffers: {}, cars: [], crowd: null, master: null, music: null, musicEl: null,
   lastImpact: [0, 0], enabled: true,
+  vol: { comments: 0.9 },
   init() {
     if (this.ctx) return;
     try {
@@ -143,6 +146,45 @@ const Audio = {
   },
 };
 
+// The race commentator. The disc has three voices (IJB, MW, PS); one is picked per race. Lines are the
+// FX_Comment_<line>_<variant>_<voice> sounds, e.g. FX_Comment_new_lap_record_A_MW.
+const Announcer = {
+  voices: ['MW', 'IJB', 'PS'],
+  last: {},
+  pickVoice() { return this.voices[Math.floor(Math.random() * this.voices.length)]; },
+  // line: e.g. 'race_over'; any variant in the race's voice, else in another voice. cooldown: seconds per line.
+  say(line, delay = 0, cooldown = 0) {
+    if (!manifest || !Audio.ctx) return;
+    const now = performance.now() / 1000;
+    if (cooldown && now - (this.last[line] || -1e9) < cooldown) return;
+    this.last[line] = now;
+    const pre = ('FX_Comment_' + line + '_').toLowerCase();
+    const all = Object.keys(manifest.sounds).filter((k) => k.toLowerCase().startsWith(pre));
+    const voice = (race && race.voice) || this.voices[0];
+    const mine = all.filter((k) => k.endsWith('_' + voice));
+    const pool = mine.length ? mine : all;
+    if (!pool.length) return;
+    const name = pool[Math.floor(Math.random() * pool.length)];
+    if (delay > 0) setTimeout(() => Audio.play(name, Audio.vol.comments), delay * 1000);
+    else Audio.play(name, Audio.vol.comments);
+  },
+};
+
+// Lap records per track and class, kept in this browser.
+const Records = {
+  key: 'bsr-records',
+  all() { try { return JSON.parse(localStorage.getItem(this.key)) || {}; } catch (e) { return {}; } },
+  get(track, cls) { return this.all()[track + '|' + cls] || 0; },
+  // Returns true for a new record (and stores it).
+  submit(track, cls, t) {
+    const all = this.all(), k = track + '|' + cls;
+    if (all[k] && all[k] <= t) return false;
+    all[k] = t;
+    try { localStorage.setItem(this.key, JSON.stringify(all)); } catch (e) {}
+    return true;
+  },
+};
+
 // ------------------------------------------------------------------ data loading
 async function fetchFiles(list, onProgress) {
   const todo = list.filter((f) => !loaded.has(f));
@@ -197,12 +239,18 @@ function buildMenu() {
     o.textContent = label;
     wx.appendChild(o);
   }
-  cls.onchange = () => { sel.cls = cls.value; sel.skin = 0; sel.skin2 = 1; refreshSel(); };
+  cls.onchange = () => { sel.cls = cls.value; sel.skin = 0; sel.skin2 = 1; refreshSel(); Net.sendProfile(); };
   for (const id of ['opp', 'laps']) {
     $(id).oninput = () => { $(id + '-v').textContent = $(id).value; Net.pushSettings(); };
   }
-  wx.onchange = () => Net.pushSettings();
+  wx.onchange = $('minutes').onchange = () => Net.pushSettings();
   for (const b of $('modes').children) b.onclick = () => setMode(b.dataset.v);
+  const choice = (id, key, conv = (v) => v) => {
+    for (const b of $(id).children) b.onclick = () => { sel[key] = conv(b.dataset.v); refreshSel(); Audio.play('menu_leftright', 0.5); };
+  };
+  choice('racetype', 'raceType');
+  choice('lenmode', 'lenMode');
+  choice('ghost', 'ghost', Number);
   refreshSel();
 }
 
@@ -226,7 +274,14 @@ function refreshSel() {
   sel.skin2 %= nSkins;
   skinButtons($('skins'), sel.skin, (i) => { sel.skin = i; Net.sendProfile(); });
   skinButtons($('skins2'), sel.skin2, (i) => { sel.skin2 = i; });
-  const split = sel.mode === 'split', online = sel.mode === 'online';
+  const split = sel.mode === 'split', online = sel.mode === 'online', practice = sel.mode === 'practice';
+  for (const b of $('racetype').children) b.classList.toggle('sel', b.dataset.v === sel.raceType);
+  for (const b of $('lenmode').children) b.classList.toggle('sel', b.dataset.v === sel.lenMode);
+  for (const b of $('ghost').children) b.classList.toggle('sel', +b.dataset.v === sel.ghost);
+  $('len-laps').classList.toggle('hidden', sel.lenMode !== 'laps');
+  $('minutes').classList.toggle('hidden', sel.lenMode !== 'time');
+  for (const id of ['row-racetype', 'row-opp', 'row-length']) $(id).classList.toggle('hidden', practice);
+  $('row-ghost').classList.toggle('hidden', !practice);
   $('row-skin2').classList.toggle('hidden', !split);
   $('skin-label').textContent = split ? 'P1 skin' : 'Skin';
   $('opp-label').textContent = online ? 'AI cars' : 'Opponents';
@@ -237,13 +292,20 @@ function refreshSel() {
   // Online guests see the host's settings but can't change them; they only pick their own skin.
   const guest = online && !Net.isHost();
   for (const b of $('tracks').children) b.disabled = guest;
-  for (const id of ['cls', 'weather', 'opp', 'laps']) $(id).disabled = guest;
+  for (const id of ['racetype', 'lenmode']) for (const b of $(id).children) b.disabled = guest;
+  for (const id of ['weather', 'opp', 'laps', 'minutes']) $(id).disabled = guest;
+  $('cls').disabled = guest && sel.raceType !== 'open';  // open races: everyone brings their own class
   const go = $('go');
   if (!online) { go.textContent = 'RACE'; go.disabled = false; }
   else if (!Net.connected()) { go.textContent = 'JOIN OR CREATE A ROOM'; go.disabled = true; }
   else if (guest) { go.textContent = 'WAITING FOR HOST'; go.disabled = true; }
   else { go.textContent = 'START RACE'; go.disabled = false; }
   Net.pushSettings();
+}
+
+// { laps, minutes }: minutes > 0 is a timed race.
+function raceLength() {
+  return sel.lenMode === 'time' ? { laps: 0, minutes: +$('minutes').value } : { laps: +$('laps').value, minutes: 0 };
 }
 
 function setMode(mode) {
@@ -269,20 +331,47 @@ function show(id) {
   }
 }
 
+// Opponents for an open race come from every class (the Monster truck only races Monster trucks).
+function randomClass(playerCls) {
+  const all = Object.keys(manifest.classes).filter((c) => c !== 'Monster');
+  return playerCls === 'Monster' ? 'Monster' : all[Math.floor(Math.random() * all.length)];
+}
+
 // Grid for a race on this machine: local players first (they start at the back), then AI cars.
 function localLineup(opts) {
   const nSkins = manifest.classes[opts.cls].skins.length;
   const humans = opts.split ? [opts.skin, opts.skin2 ?? (opts.skin + 1) % nSkins] : [opts.skin];
   const free = [...Array(nSkins).keys()].filter((i) => !humans.includes(i));
   if (!free.length) free.push(...Array(nSkins).keys());
-  const racers = humans.map((skin, p) => ({ role: String(p), skin, name: opts.split ? 'P' + (p + 1) : 'You' }));
-  const ai = Math.max(0, Math.min(opts.opponents, MAX_RACERS - humans.length));
-  for (let i = 0; i < ai; i++) racers.push({ role: 'a', skin: free[i % free.length], name: 'CPU' });
+  const racers = humans.map((skin, p) => ({ role: String(p), cls: opts.cls, skin, name: opts.split ? 'P' + (p + 1) : 'You' }));
+  const ai = opts.practice ? 0 : Math.max(0, Math.min(opts.opponents, MAX_RACERS - humans.length));
+  for (let i = 0; i < ai; i++) {
+    const cls = opts.raceType === 'open' ? randomClass(opts.cls) : opts.cls;
+    const skin = cls === opts.cls ? free[i % free.length] : Math.floor(Math.random() * manifest.classes[cls].skins.length);
+    racers.push({ role: 'a', cls, skin, name: 'CPU' });
+  }
   return racers;
 }
 
-// opts: { track, cls, laps, weather, music?, online?, racers: [{ role, skin, name }] }
-//       or the single/split form { track, cls, skin, skin2?, split?, opponents, laps, weather }.
+// The engine's race description (see parseRaceConfig in src/game.cpp).
+function raceConfig(opts) {
+  const cars = opts.racers.map((r) => {
+    const c = manifest.classes[r.cls] || manifest.classes[opts.cls];
+    return [r.cls, c.skins[r.skin % c.skins.length], c.topSpeed || 50, r.role].join(',');
+  }).join('|');
+  return [`track=${opts.track}`, `weather=${opts.weather || 'sunny_bluesky_summer'}`, `laps=${opts.laps || 3}`, `time=${(opts.minutes || 0) * 60}`,
+    `practice=${opts.practice ? 1 : 0}`, `ghost=${opts.practice ? opts.ghost || 0 : 0}`, `cars=${cars}`].join(';');
+}
+
+// A random on-track song: { mp3, wav }.
+function pickSong() {
+  const songs = ['surf', 'rock', 'dance'].flatMap((g) => manifest.music[g] || []);
+  return songs[Math.floor(Math.random() * songs.length)] || null;
+}
+
+// opts: { track, cls, laps, minutes?, weather, practice?, ghost?, raceType?, song?, online?,
+//         racers: [{ role, cls, skin, name }] }
+//       or without racers: { ..., skin, skin2?, split?, opponents } and the grid is made here.
 async function startRace(opts) {
   if (!opts.racers) opts = { ...opts, racers: localLineup(opts) };
   Audio.init();
@@ -290,23 +379,23 @@ async function startRace(opts) {
   $('go').disabled = true;
   let ok = 0;
   try {
-    const music = opts.music || manifest.music[2 + Math.floor(Math.random() * (manifest.music.length - 2))];
-    const files = [...manifest.common, ...manifest.tracks[opts.track], ...Object.values(manifest.sounds), music];
+    const song = opts.song || pickSong();
+    const files = [...manifest.common, ...manifest.tracks[opts.track], ...Object.values(manifest.sounds)];
+    if (song) files.push(song.mp3);
     setStatus('Loading…', 0);
     await fetchFiles(files, (d, n) => setStatus(`Loading ${manifest.trackNames[opts.track]}… ${d}/${n}`, d / n));
     setStatus('Building track…');
     await new Promise((r) => setTimeout(r, 20));
     if (opts.online && !Net.stillCurrent(opts)) return 0;  // host started another race while we loaded
-    const skins = manifest.classes[opts.cls].skins;
-    const top = String(manifest.classes[opts.cls].topSpeed || 50);
     Module.ccall('bsr_set_online', null, ['number'], [opts.online ? 1 : 0]);
-    ok = Module.ccall('bsr_start', 'number', ['string', 'string', 'string', 'number', 'number', 'string', 'string', 'string'],
-      [opts.track, opts.cls, opts.racers.map((r) => skins[r.skin % skins.length]).join(','), 0, opts.laps, top,
-        opts.weather || 'sunny_bluesky_summer', opts.racers.map((r) => r.role).join('')]);
+    ok = Module.ccall('bsr_start', 'number', ['string'], [raceConfig(opts)]);
     if (!ok) throw new Error('engine failed to load track');
     if (opts.online) Module.ccall('bsr_set_waiting', null, ['number'], [1]);  // until every player has loaded
     const local = opts.racers.slice(0, ok).filter((r) => /^[0-9]$/.test(r.role)).length;
-    race = { opts, count: ok, local: Math.max(1, local), names: opts.racers.map((r) => r.name), finished: new Set() };
+    race = {
+      opts, count: ok, local: Math.max(1, local), names: opts.racers.map((r) => r.name), finished: new Set(),
+      voice: Announcer.pickVoice(), best: [0, 0],
+    };
     for (const h of hudStates) for (const k of Object.keys(h)) delete h[k];
     lastRace = opts;
     setStatus('');
@@ -316,8 +405,9 @@ async function startRace(opts) {
       : '↑↓←→ drive · Space handbrake · C camera · R reset' + (opts.online ? ' · Esc menu' : ' · P pause');
     $('canvas').focus();
     Audio.startRace(opts.cls, race.local);
-    Audio.playMusic(music);
-    if (Audio.ctx && !opts.online) Audio.play('FX_Comment_racestart_in_3_seconds_A_MW', 0.9);
+    Audio.stopMusic();
+    if (song) Audio.playMusic(song.mp3);
+    if (!opts.online) Announcer.say('racestart_in_3_seconds');
   } catch (e) {
     ok = 0;
     console.error(e);
@@ -346,12 +436,17 @@ function showResults() {
   if (!race) return;
   const res = JSON.parse(Module.ccall('bsr_results', 'string', [], []));
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+  const open = race.opts.racers.some((r) => r.cls !== race.opts.racers[0].cls);
+  const timed = race.opts.minutes > 0;
   const rows = res.map((r) => {
     const name = race.names[r.i] ?? (r.player ? 'You' : 'CPU');
     const time = r.finished ? fmtTime(r.time) : r.gone ? 'left' : 'running';
-    return `<tr class="${r.player ? 'me' : ''}"><td>${r.place}</td><td>${esc(name)}</td><td>${time}</td><td>${fmtTime(r.best)}</td></tr>`;
+    return `<tr class="${r.player ? 'me' : ''}"><td>${r.place}</td><td>${esc(name)}</td>` +
+      (open ? `<td>${esc(className(r.cls))}</td>` : '') +
+      (timed ? `<td>${r.lap}</td>` : '') + `<td>${time}</td><td>${fmtTime(r.best)}</td></tr>`;
   }).join('');
-  $('res-table').innerHTML = '<tr><th>#</th><th>Driver</th><th>Time</th><th>Best lap</th></tr>' + rows;
+  $('res-table').innerHTML = '<tr><th>#</th><th>Driver</th>' + (open ? '<th>Class</th>' : '') + (timed ? '<th>Laps</th>' : '') +
+    '<th>Time</th><th>Best lap</th></tr>' + rows;
   const online = !!race.opts.online;
   $('again').classList.toggle('hidden', online && !Net.isHost());
   $('res-note').textContent = online ? (Net.isHost() ? 'Race again starts a new race for the whole room.' : 'The host starts the next race.') : '';
@@ -363,6 +458,19 @@ function showResults() {
 }
 
 // ------------------------------------------------------------------ engine callbacks
+function onLapTime(p, t) {
+  if (!race || !(t > 0)) return;
+  const cls = race.opts.racers.find((r) => r.role === String(p))?.cls || race.opts.cls;
+  const before = Records.get(race.opts.track, cls);
+  if (Records.submit(race.opts.track, cls, t) && before) {  // the very first lap on a track isn't news
+    flash('! - New Track Record - !', 2500, p);
+    Announcer.say('new_lap_record', 0.3);
+  } else if (race.best[p] && t < race.best[p]) {
+    flash('! - Your best lap this race - !', 2000, p);
+  }
+  race.best[p] = Math.min(race.best[p] || Infinity, t);
+}
+
 const msgTimers = [0, 0];
 function flash(text, ms = 1500, p) {
   for (const i of p === undefined ? [0, 1] : [p]) {
@@ -387,7 +495,9 @@ var Module = {
     $(pre + 'racers').textContent = h.racers;
     $(pre + 'lap').textContent = h.lap;
     $(pre + 'laps').textContent = h.laps;
-    $(pre + 'time').textContent = fmtTime(h.time);
+    $(pre + 'lapsof').classList.toggle('hidden', !h.laps);  // timed races and practice have no lap count
+    $(pre + 'timelabel').textContent = h.timeLeft >= 0 ? 'LEFT' : 'TIME';
+    $(pre + 'time').textContent = fmtTime(h.timeLeft >= 0 ? h.timeLeft : h.time);
     $(pre + 'laptime').textContent = fmtTime(h.lapTime);
     $(pre + 'best').textContent = fmtTime(h.best);
     $(pre + 'speed').textContent = Math.round(h.speed);
@@ -397,15 +507,27 @@ var Module = {
   },
   onAudio(rpm, thr, skid, impact, speed, p = 0) { Audio.update(rpm, thr, skid, impact, speed, p); },
   onEvent(event) {
-    const [name, ps] = event.split(':');
-    const p = ps === undefined ? 0 : +ps;
+    const [name, ps, value] = event.split(':');
+    const p = ps === undefined || ps === '' ? 0 : Math.max(0, +ps);
     const h = hudStates[p];
     const who = race && race.local > 1 ? `P${p + 1} ` : '';
     if (name === 'beep') Audio.play('menu_updown', 0.8);
     else if (name === 'go') { Audio.play('menu_action', 1); flash('GO!', 900); }
     else if (name === 'lap') flash('LAP ' + h.lap, 1500, p);
-    else if (name === 'lastlap') flash('FINAL LAP', 1500, p);
-    else if (name === 'finish') {
+    else if (name === 'lastlap') flash('FINAL LAP!', 1500, p);
+    else if (name === 'laptime') onLapTime(p, +value);
+    else if (name === 'missedcp' || name === 'wrongcp') {
+      Audio.play('FX_WARNING', 0.7);
+      flash(name === 'missedcp' ? 'YOU MISSED A CHECKPOINT!' : 'WRONG CHECKPOINT!', 2000, p);
+    } else if (name === 'timeleft') {
+      flash(ps === '1' ? '1 Minute left!' : ps + ' Minutes left!', 2500);
+      Announcer.say(ps + '_minutes_left_to_race');
+    } else if (name === 'timeup') {
+      flash('TIME IS UP!', 2500);
+      Announcer.say('race_time_is_up');
+    } else if (name === 'deadcar') {
+      if (+ps < 0) Announcer.say('warning_dead_car', 0, 25);  // someone else's car is stuck or on its roof
+    } else if (name === 'finish') {
       Audio.play('FX_horn_finish_22_mo_A', 0.9);
       const first = h.place === 1;
       flash(first ? (who ? who + 'WINS!' : 'YOU WIN!') : who + 'FINISHED P' + h.place, 3000, p);
@@ -413,7 +535,7 @@ var Module = {
       race.finished.add(p);
       if (race.finished.size < race.local) return;  // results once every local player is home
       const r = race;
-      setTimeout(() => Audio.play(first ? 'FX_Comment_finish_number_1_A_MW' : 'FX_Comment_race_over_D_MW', 0.9), 900);
+      Announcer.say(first ? 'finish_number_1' : 'race_over', 0.9);
       setTimeout(() => { if (race === r) showResults(); }, 3500);
     } else if (name === 'paused') show('pause');
     else if (name === 'resumed') show(null);
@@ -529,7 +651,7 @@ const Net = {
         setStatus(m.msg);
         break;
       case 'profile':
-        this.profiles[m.from] = { skin: m.skin | 0 };
+        this.profiles[m.from] = { skin: m.skin | 0, cls: manifest.classes[m.cls] ? m.cls : null };
         break;
       case 'settings':
         if (fromHost) this.applySettings(m);
@@ -555,11 +677,12 @@ const Net = {
     this.renderLobby();
   },
 
-  sendProfile() { if (this.connected()) this.send({ t: 'profile', skin: sel.skin }); },
+  sendProfile() { if (this.connected()) this.send({ t: 'profile', skin: sel.skin, cls: sel.cls }); },
 
   pushSettings() {
     if (!this.isHost()) return;
-    const s = { track: sel.track, cls: sel.cls, weather: $('weather').value, opponents: +$('opp').value, laps: +$('laps').value };
+    const s = { track: sel.track, cls: sel.cls, weather: $('weather').value, opponents: +$('opp').value, laps: +$('laps').value,
+      minutes: +$('minutes').value, lenMode: sel.lenMode, raceType: sel.raceType };
     const key = JSON.stringify(s);
     if (key === this.settings) return;
     this.settings = key;
@@ -567,8 +690,12 @@ const Net = {
   },
   applySettings(m) {
     if (manifest.tracks[m.track]) sel.track = m.track;
-    if (manifest.classes[m.cls] && sel.cls !== m.cls) { sel.cls = m.cls; sel.skin = 0; this.sendProfile(); }
+    sel.raceType = m.raceType === 'open' ? 'open' : 'cup';
+    sel.lenMode = m.lenMode === 'time' ? 'time' : 'laps';
+    // Cup races use the host's class; in open races everyone keeps their own.
+    if (sel.raceType === 'cup' && manifest.classes[m.cls] && sel.cls !== m.cls) { sel.cls = m.cls; sel.skin = 0; this.sendProfile(); }
     $('cls').value = sel.cls;
+    if (RACE_MINUTES.includes(m.minutes)) $('minutes').value = m.minutes;
     $('weather').value = m.weather;
     $('opp').value = m.opponents;
     $('laps').value = m.laps;
@@ -585,8 +712,10 @@ const Net = {
     const esc = (t) => String(t).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
     $('net-players').innerHTML = this.players.map((p) => {
       const tags = [p.id === this.host && 'host', p.id === this.id && 'you'].filter(Boolean).join(', ');
-      const skin = p.id === this.id ? sel.skin : this.profiles[p.id] ? this.profiles[p.id].skin : null;
-      return `<li>${esc(p.name)}${skin !== null ? ` <span class="tag">skin ${skin + 1}</span>` : ''}` +
+      const prof = p.id === this.id ? { skin: sel.skin, cls: sel.cls } : this.profiles[p.id];
+      const skin = prof ? prof.skin : null;
+      const cls = sel.raceType === 'open' && prof && prof.cls ? ` <span class="tag">${esc(className(prof.cls))}</span>` : '';
+      return `<li>${esc(p.name)}${cls}${skin !== null ? ` <span class="tag">skin ${skin + 1}</span>` : ''}` +
         `${tags ? ` <span class="tag">(${tags})</span>` : ''}</li>`;
     }).join('');
   },
@@ -594,19 +723,25 @@ const Net = {
   // Host: pick the grid and tell everyone. Players start at the back in join order, AI cars fill the front.
   startRace() {
     if (!this.isHost() || !manifest) return;
+    const open = sel.raceType === 'open';
+    const lineup = this.players.slice(0, MAX_RACERS).map((p) => {
+      const prof = p.id === this.id ? { skin: sel.skin, cls: sel.cls } : this.profiles[p.id] || { skin: 0 };
+      const cls = open && prof.cls ? prof.cls : sel.cls;
+      return { peer: p.id, name: p.name, cls, skin: prof.skin % manifest.classes[cls].skins.length };
+    });
     const nSkins = manifest.classes[sel.cls].skins.length;
-    const lineup = this.players.slice(0, MAX_RACERS).map((p) => ({
-      peer: p.id, name: p.name, skin: (p.id === this.id ? sel.skin : (this.profiles[p.id] || { skin: 0 }).skin) % nSkins,
-    }));
-    const used = new Set(lineup.map((e) => e.skin));
+    const used = new Set(lineup.filter((e) => e.cls === sel.cls).map((e) => e.skin));
     const free = [...Array(nSkins).keys()].filter((i) => !used.has(i));
     if (!free.length) free.push(...Array(nSkins).keys());
     const ai = Math.max(0, Math.min(+$('opp').value, MAX_RACERS - lineup.length));
-    for (let i = 0; i < ai; i++) lineup.push({ peer: 0, name: 'CPU', skin: free[i % free.length] });
+    for (let i = 0; i < ai; i++) {
+      const cls = open ? randomClass(sel.cls) : sel.cls;
+      const skin = cls === sel.cls ? free[i % free.length] : Math.floor(Math.random() * manifest.classes[cls].skins.length);
+      lineup.push({ peer: 0, name: 'CPU', cls, skin });
+    }
     const msg = {
       t: 'race', race: 1 + Math.floor(Math.random() * 0xfffffe),  // exact as a float32: tags state packets
-      track: sel.track, cls: sel.cls, weather: $('weather').value, laps: +$('laps').value, lineup,
-      music: manifest.music[2 + Math.floor(Math.random() * (manifest.music.length - 2))],
+      track: sel.track, cls: sel.cls, weather: $('weather').value, lineup, song: pickSong(), ...raceLength(),
     };
     this.send(msg);
     this.joinRace({ ...msg, from: this.id });
@@ -617,8 +752,10 @@ const Net = {
     if (race) stopRace();
     const roles = m.lineup.map((e) => (e.peer === this.id ? '0' : !e.peer && this.isHost() ? 'a' : 'r'));
     const opts = {
-      online: true, raceId: m.race, track: m.track, cls: m.cls, weather: m.weather, laps: m.laps, music: m.music,
-      racers: m.lineup.map((e, i) => ({ role: roles[i], skin: e.skin, name: e.peer === this.id ? 'You' : e.name })),
+      online: true, raceId: m.race, track: m.track, cls: m.cls, weather: m.weather, laps: m.laps, minutes: m.minutes | 0,
+      song: m.song,
+      racers: m.lineup.map((e, i) => ({ role: roles[i], cls: manifest.classes[e.cls] ? e.cls : m.cls, skin: e.skin,
+        name: e.peer === this.id ? 'You' : e.name })),
     };
     const r = this.race = {
       id: m.race, opts, lineup: m.lineup, ready: new Set(), started: false, go: false,
@@ -662,7 +799,7 @@ const Net = {
     r.go = true;
     if (race && race.opts === r.opts) {
       Module.ccall('bsr_set_waiting', null, ['number'], [0]);
-      if (Audio.ctx) Audio.play('FX_Comment_racestart_in_3_seconds_A_MW', 0.9);
+      Announcer.say('racestart_in_3_seconds');
     }
   },
 
@@ -715,7 +852,8 @@ const inMenu = () => !$('menu').classList.contains('hidden');
 $('go').onclick = () => {
   if (sel.mode === 'online') return Net.startRace();
   startRace({ track: sel.track, cls: sel.cls, skin: sel.skin, skin2: sel.skin2, split: sel.mode === 'split',
-    opponents: +$('opp').value, laps: +$('laps').value, weather: $('weather').value });
+    practice: sel.mode === 'practice', ghost: sel.ghost, raceType: sel.raceType, opponents: +$('opp').value,
+    weather: $('weather').value, ...raceLength() });
 };
 const replay = () => {
   if (lastRace && lastRace.online) Net.startRace();

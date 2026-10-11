@@ -185,23 +185,15 @@ EMSCRIPTEN_KEEPALIVE int bsr_init() {
     return 1;
 }
 
-// skins: comma-separated texture names, assigned to racers in order.
-// roles: see Game::start ("" = one local player plus `opponents` AI cars).
+// config: see parseRaceConfig ("track=mach;laps=3;cars=pro_std,skin,58,0|pro_std,skin2,58,a|...").
 // Returns the number of cars on the grid, 0 on failure.
-EMSCRIPTEN_KEEPALIVE int bsr_start(const char* track, const char* carClass, const char* skins, int opponents, int laps,
-                                   const char* topSpeedKmh, const char* weather, const char* roles) {
-    std::vector<std::string> list;
-    std::string s = skins;
-    for (size_t p = 0; p <= s.size();) {
-        size_t e = s.find(',', p);
-        if (e == std::string::npos) e = s.size();
-        if (e > p) list.push_back(s.substr(p, e - p));
-        p = e + 1;
-    }
+EMSCRIPTEN_KEEPALIVE int bsr_start(const char* config) {
+    RaceConfig cfg;
+    if (!parseRaceConfig(config, cfg)) return 0;
     memset(keys, 0, sizeof keys);
     memset(steerSmooth, 0, sizeof steerSmooth);
     lastT = emscripten_get_now() / 1000.0;
-    if (!game.start(track, carClass, list, opponents, laps, (float)atof(topSpeedKmh), weather, roles)) return 0;
+    if (!game.start(cfg)) return 0;
     return (int)game.racers().size();
 }
 
