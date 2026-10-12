@@ -232,6 +232,12 @@ class H(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def end_headers(self):
+        # Revalidate every file (cheap: unchanged ones answer 304), so a rebuild or repack is picked up on reload
+        # instead of the browser running a cached game.js / bsr.wasm.
+        self.send_header('Cache-Control', 'no-cache')
+        super().end_headers()
+
     def do_GET(self):
         if urllib.parse.urlparse(self.path).path == '/ws' and self.headers.get('Upgrade', '').lower() == 'websocket':
             serve_websocket(self)

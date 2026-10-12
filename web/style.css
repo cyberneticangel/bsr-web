@@ -72,12 +72,15 @@ button.big { display: block; width: 100%; margin: 18px 0 8px; padding: 12px; fon
 .hbar .hv b { color: var(--accent); font-size: 1.35em; }
 .hbar .hv small { font-size: 0.75em; }
 .hud-tl { position: absolute; left: 1em; top: 0.9em; }
+.minimap { position: static; display: block; width: 11em; height: auto; margin-top: 0.4em; }
 .hud-tr { position: absolute; right: 1em; top: 0.9em; }
 .hud-tr .hbar { width: 14em; }
 .hud-br { position: absolute; right: 1.2em; bottom: 1em; display: flex; flex-direction: column; align-items: flex-end; gap: 0.25em; }
 .meter { position: relative; width: 12em; height: 3em; }
 .meter::before { content: ""; position: absolute; inset: 0; background: var(--img) left / 12em 100% no-repeat; opacity: 0.3; }
 .meter .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--img) left / 12em 100% no-repeat; }
+/* The rev meter's texture hangs its bars down from the top; flip it to grow upwards like the speed meter. */
+.meter.rev::before, .meter.rev .fill { scale: 1 -1; }
 .hud-br .speed { font-size: 2.6em; line-height: 1; font-variant-numeric: tabular-nums; }
 .hud-br .speed small { font-size: 0.32em; margin-left: 0.3em; }
 .hud-keys { position: absolute; left: 16px; bottom: 12px; font: 12px "Trebuchet MS", sans-serif; color: var(--muted); }

@@ -183,6 +183,10 @@ def main(data, web):
             manifest['hud'][name.lower()] = fl[0]
     manifest['common'] = sorted(common)
     used |= common
+    # The original menu backdrop (logo wall, checker, the turning transmitter), loaded before the first race.
+    menu = {'menuscene.fso'} | fso_textures('menuscene.fso', '')
+    manifest['menu'] = sorted(menu)
+    used |= menu
     total = 0
     for rel in sorted(used):
         dst = os.path.join(out, rel)

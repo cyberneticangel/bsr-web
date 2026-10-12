@@ -41,8 +41,13 @@ const document = {
   addEventListener() {}, hidden: false, body: el('body'),
 };
 
+// ---- fake 2D context: every method is a no-op (HUD map, texture decoding); properties can be set
 function fake2D() {
-  return { clearRect() {}, putImageData() {}, drawImage() {}, scale() {}, fillRect() {} };
+  const props = {};
+  return new Proxy(props, {
+    get: (_, k) => (k in props ? props[k] : k === 'createImageData' ? (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }) : () => {}),
+    set: (_, k, v) => { props[k] = v; return true; },
+  });
 }
 
 // ---- fake WebGL2: every call succeeds; counts draws

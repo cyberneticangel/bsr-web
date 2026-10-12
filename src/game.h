@@ -68,10 +68,17 @@ public:
     void render(int w, int h);  // one viewport per local player, stacked top to bottom
     void cycleCamera(int p = 0);
     void setCamera(int m);
+    // Puts the player's car back on the racing line at the last checkpoint passed in order (before the first
+    // start line crossing: its grid slot).
     void resetPlayer(int p = 0);
     std::string hudJson(int p = 0) const;
+    // Track outline (racing line 0) and checkpoints in world x, y for the HUD map:
+    // {"line":[[x,y],...],"cps":[[ax,ay,bx,by],...]}, checkpoint 0 is the start/finish line.
+    std::string mapJson() const;
     // Renders one car (class, skin texture) on a transparent background for the menu. rgba: w*h*4, rows bottom-up.
     bool renderPreview(const std::string& cls, const std::string& skin, int w, int h, std::vector<uint8_t>& rgba);
+    // The original menu backdrop (Menuscene.fso): loads it once; false if its files are missing.
+    bool loadMenuScene();
     std::string resultsJson() const;
     // Where the cars are on screen in player 0's view (for name tags): JSON [[racer, x, y, distance], ...] with
     // x, y in 0..1 of the canvas (y down), for cars in front of the camera. remoteOnly: only network cars.
@@ -88,6 +95,7 @@ public:
     bool waiting = false;    // grid is set but the countdown is held (online: waiting for every player to load)
     bool autopilot = false;  // player car driven by AI (tests / after finishing)
     bool debugLines = false;
+    bool menuScene = false;  // render the menu backdrop instead of the race (menu, results); the race keeps running
     Effects& effects() { return fx_; }
     State state() const { return state_; }
     bool raining() const { return rain_; }
@@ -107,6 +115,7 @@ private:
     struct CarModel {
         Model model;
         std::vector<Part*> parts;
+        std::vector<Part*> shadow;  // the drop shadow quad: drawn flat on the ground, not with the body
         Part* wheel[4] = {};
         V3 wheelCentre[4];
         V3 bodyLo, bodyHi;  // model-space bounds of the solid body parts (no wheels, shadow or helpers)
@@ -119,7 +128,14 @@ private:
         V3 camPos;
         bool camInit = false;
     };
+    // Drop shadow: the car's heading on the ground under its centre of mass, without body roll or pitch.
+    // alpha fades with the height above the ground; false when there is no ground under the car.
+    bool shadowMatrix(const Car& c, M4& out, float& alpha) const;
+    void drawCarShadow(const CarModel& cm, const Car& c, float alphaMul = 1.0f);
     void placeOnLine(Racer& r);
+    void placeAtCheckpoint(Racer& r);
+    // Checkpoints the racer cut past without driving through them, in order.
+    std::vector<int> missedCheckpoints(const Racer& r) const;
     void updateCamera(View& v, float dt, int x, int y, int w, int h);
     void draw();
     void stepPhysics(float dt);
@@ -169,6 +185,19 @@ private:
     State state_ = Idle;
     float podiumTime_ = 0;
     void podiumCamera(int x, int y, int w, int h);
+    // Menu backdrop: the logo wall and the checker in front of it slide in opposite directions, the transmitter
+    // turns about its own centre (the original's animation, from Big Scale Racing.exe at 0x41e200).
+    void renderMenu(int w, int h);
+    Model menu_;
+    bool menuLoaded_ = false;
+    Part* menuWall_ = nullptr;
+    Part* menuChecker_ = nullptr;
+    std::vector<Part*> menuController_;
+    V3 menuPivot_;
+    Renderer::Env menuEnv_{}, raceEnv_{};
+    bool menuEnvOn_ = false;  // the renderer holds menuEnv_; raceEnv_ is the race's, to restore
+    float menuTime_ = 0;
+    double menuNow_ = -1;
     int defaultCam_ = 0;
     int lastCountdownSec_ = -1;
 };

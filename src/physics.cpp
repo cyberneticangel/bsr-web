@@ -347,8 +347,21 @@ void Car::step(float dt, const CollisionWorld& world) {
         }
     }
 
-    rpm = clampf(std::fabs(fwdSpeed) / spec.topSpeed, 0.0f, 1.2f);
-    if (throttle > 0.1f && contacts < 2) rpm = std::min(1.2f, rpm + 0.4f);
+    // Engine revs: follow the wheels, but the clutch lets the engine rev with the throttle from a standstill,
+    // wheelspin and air time let it run free, and it has inertia (quicker up than down).
+    float slip = 0;
+    for (const auto& w : wheels)
+        if (spec.fourWD || !w.front) slip = std::max(slip, w.slip);
+    float target = std::fabs(fwdSpeed) / spec.topSpeed;
+    if (!hold && (throttle > 0.05f || (reversing && brake > 0.05f))) {
+        float t = std::max(throttle, reversing ? brake : 0.0f);
+        target = std::max(target, 0.3f + 0.5f * t) + slip * 0.4f * t;
+        if (contacts == 0) target += 0.5f * t;
+    }
+    target = std::min(target, 1.12f);
+    rpm += clampf(target - rpm, -3.0f * dt, 6.0f * dt);
+    if (rpm > 1.0f && target > 1.0f) rpm -= 0.06f * (0.5f + 0.5f * std::sin(rpmPhase_ += dt * 90.0f));  // limiter
+    rpm = clampf(rpm, 0.0f, 1.15f);
 }
 
 M4 Car::bodyMatrix() const { return M4::fromRT(R, pos) * M4::translate(-comModel); }
@@ -360,30 +373,41 @@ M4 Car::wheelMatrix(int i, const V3& c) const {
 
 void collideCars(Car& a, Car& b, bool moveA, bool moveB) {
     V3 d = b.pos - a.pos;
-    float rr = (a.boundRadius + b.boundRadius) * 0.6f;
-    if (dot(d, d) > rr * rr * 4) return;
-    // Two spheres per car along its forward axis.
-    for (int i = -1; i <= 1; i += 2)
-        for (int j = -1; j <= 1; j += 2) {
-            V3 pa = a.pos + a.R.col(1) * (0.16f * i);
-            V3 pb = b.pos + b.R.col(1) * (0.16f * j);
+    float rr = a.boundRadius + b.boundRadius;
+    if (dot(d, d) > rr * rr) return;
+    // The models' own collision spheres, so the whole body (nose, rear wing) touches; not the skid spheres.
+    auto count = [](const Car& c) { return c.bodySpheres < 0 ? (int)c.spheres.size() : std::min(c.bodySpheres, (int)c.spheres.size()); };
+    int na = count(a), nb = count(b);
+    // Deepest contact only: summing every overlapping pair would push the cars apart many times over.
+    float best = 0;
+    V3 bn;
+    for (int i = 0; i < na; i++) {
+        V3 pa = a.pos + a.R * a.spheres[i].c;
+        for (int j = 0; j < nb; j++) {
+            V3 pb = b.pos + b.R * b.spheres[j].c;
             V3 dd = pb - pa;
-            float dist = len(dd);
-            float r = 0.36f;
-            if (dist >= r || dist < 1e-5f) continue;
-            V3 n = dd * (1.0f / dist);
+            float r = a.spheres[i].r + b.spheres[j].r;
+            float dist2 = dot(dd, dd);
+            if (dist2 >= r * r) continue;
+            float dist = std::sqrt(dist2);
             float pen = r - dist;
-            if (moveA) a.pos -= n * (pen * 0.5f);
-            if (moveB) b.pos += n * (pen * 0.5f);
-            float vn = dot(b.vel - a.vel, n);
-            if (vn < 0) {
-                float j = -(1.3f) * vn / (1 / a.spec.mass + 1 / b.spec.mass);
-                if (moveA) a.vel -= n * (j / a.spec.mass);
-                if (moveB) b.vel += n * (j / b.spec.mass);
-                a.impact = std::max(a.impact, j / a.spec.mass);
-                b.impact = std::max(b.impact, j / b.spec.mass);
-            }
+            if (pen <= best) continue;
+            best = pen;
+            bn = dist > 1e-5f ? dd * (1.0f / dist) : norm(d);
         }
+    }
+    if (best <= 0) return;
+    V3 n = norm(V3(bn.x, bn.y, bn.z * 0.3f));  // mostly sideways: cars shouldn't climb onto each other
+    if (moveA) a.pos -= n * (best * 0.5f);
+    if (moveB) b.pos += n * (best * 0.5f);
+    float vn = dot(b.vel - a.vel, n);
+    if (vn < 0) {
+        float j = -(1.3f) * vn / (1 / a.spec.mass + 1 / b.spec.mass);
+        if (moveA) a.vel -= n * (j / a.spec.mass);
+        if (moveB) b.vel += n * (j / b.spec.mass);
+        a.impact = std::max(a.impact, j / a.spec.mass);
+        b.impact = std::max(b.impact, j / b.spec.mass);
+    }
 }
 
 }  // namespace bsr

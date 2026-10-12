@@ -77,15 +77,17 @@ public:
     V3 comModel;          // CoM in model coords
     std::vector<Wheel> wheels;
     std::vector<CollSphere> spheres;  // relative to CoM
+    int bodySpheres = -1;             // the first n spheres are the model's own (car-to-car contact); -1: all
     CarSpec spec;
     float impact = 0;     // strongest collision impulse this step (for audio)
     float skid = 0;       // 0..1
-    float rpm = 0;        // 0..1 engine sound pitch driver
+    float rpm = 0;        // engine revs, 0..1.15 (1: top speed); drives the engine sound and the rev meter
     float airTime = 0;
     float boundRadius = 0.4f;
 
 private:
     V3 inertia_;  // body-frame diagonal
+    float rpmPhase_ = 0;
     void applyImpulse(const V3& at, const V3& J);
 };
 

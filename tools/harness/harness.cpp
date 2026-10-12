@@ -139,6 +139,29 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
+    if (getenv("MENU")) {  // MENU=1: the menu backdrop at each shot time, at 16:9 (W x H) and 4:3 (H*4/3 x H)
+        if (!game.loadMenuScene()) { fprintf(stderr, "menu scene failed\n"); return 1; }
+        game.menuScene = true;
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        double clock = 0;
+        int idx = 0;
+        for (float st : shots) {
+            for (; clock < st; clock += 0.05) {  // the backdrop advances at most 0.1 s per frame
+                game.setNow(clock);
+                game.render(W, H);
+            }
+            for (int w : {W, H * 4 / 3}) {
+                game.setNow(clock);
+                game.render(w, H);
+                std::vector<uint8_t> px((size_t)w * H * 4);
+                glReadPixels(0, 0, w, H, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+                char name[64];
+                snprintf(name, sizeof name, "/menu_%02d_%d.png", idx++, w);
+                writePNG(out + name, w, H, px);
+            }
+        }
+        return 0;
+    }
     RaceConfig cfg;
     cfg.track = track;
     cfg.weather = wx;

@@ -61,6 +61,19 @@ public:
     void setSun(const V3& dir, float amb, float diff) { sunDir_ = norm(dir); amb_ = amb; diff_ = diff; }
     void setFog(float r, float g, float b, float start, float end) { fog_[0] = r; fog_[1] = g; fog_[2] = b; fogStart_ = start; fogEnd_ = end; }
     void setTint(float r, float g, float b) { tint_[0] = r; tint_[1] = g; tint_[2] = b; }
+    // Sun, fog (also the clear colour) and tint together, to switch between the race and the menu scene.
+    struct Env {
+        V3 sunDir;
+        float amb, diff, fog[3], fogStart, fogEnd, tint[3];
+    };
+    Env env() const {
+        return {sunDir_, amb_, diff_, {fog_[0], fog_[1], fog_[2]}, fogStart_, fogEnd_, {tint_[0], tint_[1], tint_[2]}};
+    }
+    void setEnv(const Env& e) {
+        setSun(e.sunDir, e.amb, e.diff);
+        setFog(e.fog[0], e.fog[1], e.fog[2], e.fogStart, e.fogEnd);
+        setTint(e.tint[0], e.tint[1], e.tint[2]);
+    }
     void drawLines(const std::vector<float>& xyz, float r, float g, float b);
     // Alpha-blended, fogged, depth-tested without depth writes. quads: 4 vertices each (a, b, c, d around).
     // decal: pulled towards the camera so marks on the ground don't z-fight with it.

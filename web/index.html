@@ -19,6 +19,7 @@
   <div class="hud-tl">
     <div class="hbar" data-img="hud_position"><span class="hl">POS.</span><span class="hv"><b id="$place">1</b><small>/<span id="$racers">1</span></small></span></div>
     <div class="hbar" data-img="hud_lap"><span class="hl">LAP</span><span class="hv"><span id="$lap">1</span><small id="$lapsof">/<span id="$laps">3</span></small></span></div>
+    <canvas class="minimap hidden" id="$map"></canvas>
   </div>
   <div class="hud-tr">
     <div class="hbar" data-img="hud_timeremaining"><span class="hl" id="$timelabel">TIME</span><span class="hv" id="$time">0:00.00</span></div>
@@ -26,8 +27,8 @@
     <div class="hbar" data-img="hud_bestlap"><span class="hl">BEST LAP</span><span class="hv" id="$best">-:--.--</span></div>
   </div>
   <div class="hud-br">
-    <div class="meter" data-img="hud_revsback"><div class="fill" data-img="hud_revs" id="$rev"></div></div>
     <div class="meter" data-img="hud_speedback"><div class="fill" data-img="hud_speed" id="$spd"></div></div>
+    <div class="meter rev" data-img="hud_revsback"><div class="fill" data-img="hud_revs" id="$rev"></div></div>
     <div class="speed"><span id="$speed">0</span><small>KPH</small></div>
   </div>
   <div id="$countdown" class="countdown"></div>

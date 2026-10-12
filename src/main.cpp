@@ -43,9 +43,21 @@ int keyIndex(const char* code) {
     return -1;
 }
 
+// True while the player is typing into a form field or the menu is open: keys then belong to the page.
+EM_JS(int, js_page_has_keys, (), {
+    const a = document.activeElement;
+    if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable)) return 1;
+    const m = document.getElementById('menu');
+    return m && !m.classList.contains('hidden') ? 1 : 0;
+});
+
 EM_BOOL onKey(int type, const EmscriptenKeyboardEvent* e, void*) {
     int k = keyIndex(e->code);
     if (k < 0) return EM_FALSE;
+    if (js_page_has_keys()) {
+        keys[k] = false;
+        return EM_FALSE;
+    }
     bool down = type == EMSCRIPTEN_EVENT_KEYDOWN;
     bool split = game.localPlayers() > 1;
     if (down && !e->repeat) {
@@ -138,7 +150,8 @@ void frame() {
     double now = emscripten_get_now() / 1000.0;
     float dt = (float)std::fmin(0.1, now - lastT);
     lastT = now;
-    if (game.state() == Game::Idle) return;
+    bool idle = game.state() == Game::Idle;
+    if (idle && !game.menuScene) return;
     int w, h;
     emscripten_get_canvas_element_size("#canvas", &w, &h);
     double cw, ch;
@@ -150,11 +163,13 @@ void frame() {
         w = tw;
         h = th;
     }
-    Input in[Game::kMaxLocal];
-    int n = std::max(1, std::min(game.localPlayers(), (int)Game::kMaxLocal));
-    readInputs(dt, in, n);
     game.setNow(now);
-    game.update(dt, in, n);
+    if (!idle) {
+        Input in[Game::kMaxLocal];
+        int n = std::max(1, std::min(game.localPlayers(), (int)Game::kMaxLocal));
+        readInputs(dt, in, n);
+        game.update(dt, in, n);
+    }
     game.render(w, h);
     hudTimer -= dt;
     if (hudTimer <= 0) {
@@ -211,6 +226,11 @@ EMSCRIPTEN_KEEPALIVE void bsr_camera(int player) { game.cycleCamera(player); }
 EMSCRIPTEN_KEEPALIVE void bsr_reset_car(int player) { game.resetPlayer(player); }
 EMSCRIPTEN_KEEPALIVE void bsr_autopilot(int on) { game.autopilot = on != 0; }
 EMSCRIPTEN_KEEPALIVE void bsr_stop() { game.stop(); }
+// The original menu backdrop behind the menu and the results (its files must be in /data). Returns 1 if shown.
+EMSCRIPTEN_KEEPALIVE int bsr_menu(int on) {
+    game.menuScene = on != 0 && game.loadMenuScene();
+    return game.menuScene ? 1 : 0;
+}
 EMSCRIPTEN_KEEPALIVE int bsr_podium() { return game.startPodium() ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE const char* bsr_results() {
     static std::string r;
@@ -242,6 +262,13 @@ EMSCRIPTEN_KEEPALIVE const uint8_t* bsr_preview(const char* cls, const char* ski
 EMSCRIPTEN_KEEPALIVE const char* bsr_screen(int remoteOnly) {
     static std::string out;
     out = game.screenJson(remoteOnly != 0);
+    return out.c_str();
+}
+
+// Track outline and checkpoints for the HUD map (Game::mapJson), once per race.
+EMSCRIPTEN_KEEPALIVE const char* bsr_map() {
+    static std::string out;
+    out = game.mapJson();
     return out.c_str();
 }
 

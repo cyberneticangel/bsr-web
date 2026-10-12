@@ -377,6 +377,72 @@ const Hud = {
     el.appendChild(i);
     if (key === 'go') setTimeout(() => { if (this.shown[p] === 'go') this.countdown(p, ''); }, 900);
   },
+  // Track map, top left: the racing line, checkpoints (green: passed this lap, red: not yet; the next one larger,
+  // missed ones pulsing), the cars.
+  map: null,
+  loadMap() {
+    let m = null;
+    try { m = JSON.parse(Module.ccall('bsr_map', 'string', [], [])); } catch (e) { /* no map */ }
+    this.map = m && m.line && m.line.length > 1 ? m : null;
+    for (const pre of ['h-', 'h2-']) $(pre + 'map').classList.toggle('hidden', !this.map);
+    if (!this.map) return;
+    const xs = [], ys = [];
+    for (const [x, y] of m.line) { xs.push(x); ys.push(y); }
+    for (const [ax, ay, bx, by] of m.cps) xs.push(ax, bx), ys.push(ay, by);
+    m.x0 = Math.min(...xs); m.y1 = Math.max(...ys);
+    m.w = Math.max(Math.max(...xs) - m.x0, 1e-3); m.h = Math.max(m.y1 - Math.min(...ys), 1e-3);
+    m.aspect = Math.min(1.4, Math.max(0.5, m.h / m.w));  // canvas height / width
+  },
+  drawMap(p, h) {
+    const m = this.map, cv = $((p ? 'h2-' : 'h-') + 'map');
+    if (!m || !cv || h.x === undefined) return;
+    const dpr = window.devicePixelRatio || 1, cw = cv.clientWidth;
+    if (!cw) return;
+    cv.style.height = (cw * m.aspect).toFixed(1) + 'px';
+    const W = Math.round(cw * dpr), H = Math.round(cw * m.aspect * dpr);
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    const g = cv.getContext('2d');
+    const u = cw / 110 * dpr;  // drawing unit: 1/110 of the map width
+    const pad = 7 * u, k = Math.min((W - 2 * pad) / m.w, (H - 2 * pad) / m.h);
+    const ox = (W - m.w * k) / 2, oy = (H - m.h * k) / 2;
+    const X = (x) => ox + (x - m.x0) * k, Y = (y) => oy + (m.y1 - y) * k;  // world y points up the map
+    g.clearRect(0, 0, W, H);
+    g.lineCap = g.lineJoin = 'round';
+    g.beginPath();
+    m.line.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))));
+    g.closePath();
+    g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = 6 * u; g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 2.6 * u; g.stroke();
+    const missed = new Set(h.missed || []), passed = new Set(h.passed || []);
+    const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 160);
+    m.cps.forEach(([ax, ay, bx, by], i) => {  // a short bar across the track, centred on the gate
+      const cx = X((ax + bx) / 2), cy = Y((ay + by) / 2);
+      const big = missed.has(i) || i === h.next;
+      let dx = X(bx) - X(ax), dy = Y(by) - Y(ay);
+      const l = Math.hypot(dx, dy) || 1, r = (big ? 6 : 4.5) * u;
+      dx = dx / l * r; dy = dy / l * r;
+      g.beginPath(); g.moveTo(cx - dx, cy - dy); g.lineTo(cx + dx, cy + dy);
+      g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = (big ? 4.5 : 3.2) * u; g.stroke();
+      g.strokeStyle = missed.has(i) ? `rgba(255,59,48,${pulse})` : passed.has(i) ? '#34c759' : i === h.next ? '#ff5a4f' : '#e0281e';
+      g.lineWidth = (big ? 2.8 : 1.8) * u; g.stroke();
+      if (missed.has(i)) {
+        g.beginPath(); g.arc(cx, cy, 7.5 * u, 0, Math.PI * 2);
+        g.strokeStyle = `rgba(255,59,48,${pulse})`; g.lineWidth = 1.4 * u; g.stroke();
+      }
+    });
+    for (const [x, y] of h.cars || []) {
+      g.beginPath(); g.arc(X(x), Y(y), 2.4 * u, 0, Math.PI * 2);
+      g.fillStyle = '#d6dae0'; g.fill();
+      g.strokeStyle = 'rgba(0,0,0,0.7)'; g.lineWidth = 0.9 * u; g.stroke();
+    }
+    g.save();  // the player: an arrow along the heading
+    g.translate(X(h.x), Y(h.y)); g.rotate(-h.hd);
+    g.beginPath(); g.moveTo(5 * u, 0); g.lineTo(-3.5 * u, 3.4 * u); g.lineTo(-1.8 * u, 0); g.lineTo(-3.5 * u, -3.4 * u);
+    g.closePath();
+    g.fillStyle = '#ffcc1a'; g.fill();
+    g.strokeStyle = 'rgba(0,0,0,0.8)'; g.lineWidth = 1 * u; g.stroke();
+    g.restore();
+  },
 };
 Hud.build();
 
@@ -739,8 +805,27 @@ function setMode(mode) {
   Net.renderLobby();
 }
 
+// The original menu backdrop (Menuscene.fso), rendered by the engine behind the menu and the results.
+const Backdrop = {
+  ready: null,
+  want: false,
+  load() {
+    this.ready ||= fetchFiles(manifest.menu, () => {}).then(() => true, (e) => { console.warn('menu scene', e); return false; });
+    return this.ready;
+  },
+  show(on) {
+    this.want = on;
+    if (!on) { Module.ccall('bsr_menu', 'number', ['number'], [0]); return; }
+    if (!manifest || !manifest.menu) return;
+    this.load().then((ok) => { if (ok && this.want) Module.ccall('bsr_menu', 'number', ['number'], [1]); });
+  },
+};
+
 function show(id) {
+  const fromPodium = !$('podium').classList.contains('hidden');
   for (const p of ['menu', 'pause', 'results', 'podium']) $(p).classList.toggle('hidden', p !== id);
+  // Results online while others still race keep the live race behind them.
+  Backdrop.show(id === 'menu' || (id === 'results' && (fromPodium || !(race && race.opts.online))));
   const racing = id === null;
   $('hud').classList.toggle('hidden', !racing && id !== 'pause');
   if (id !== null && id !== 'pause') showBoard(false);
@@ -831,6 +916,7 @@ async function startRace(opts) {
       voice: Announcer.pickVoice(), best: [0, 0],
     };
     for (const h of hudStates) for (const k of Object.keys(h)) delete h[k];
+    Hud.loadMap();
     lastRace = opts;
     setStatus('');
     show(null);
@@ -974,9 +1060,10 @@ var Module = {
     $(pre + 'best').textContent = fmtTime(h.best);
     $(pre + 'speed').textContent = Math.round(h.speed);
     $(pre + 'spd').style.width = Math.min(100, h.speed / Math.max(h.top, 1) * 100).toFixed(1) + '%';
-    $(pre + 'rev').style.width = Math.min(100, h.rpm * 85).toFixed(1) + '%';
+    $(pre + 'rev').style.width = Math.min(100, h.rpm / 1.15 * 100).toFixed(1) + '%';
     if (h.countdown > 0 && !h.waiting) Hud.countdown(p, Math.min(5, h.countdown));
     else if (Hud.shown[p] !== 'go') Hud.countdown(p, '');
+    Hud.drawMap(p, h);
     if (h.waiting) $(pre + 'msg').textContent = 'Waiting for players…';
     else if ($(pre + 'msg').textContent === 'Waiting for players…') $(pre + 'msg').textContent = '';
   },
@@ -1031,6 +1118,7 @@ var Module = {
     }
     buildMenu();
     setStatus('');
+    Backdrop.show(inMenu());
     Hud.loadImages().catch((e) => console.warn('hud', e));
     if (params.get('room')) {  // invite link
       $('net-code').value = params.get('room').toUpperCase();
@@ -1435,6 +1523,8 @@ window.addEventListener('keydown', (e) => {
   if (!e.repeat) showBoard(true);
 });
 window.addEventListener('keyup', (e) => { if (e.code === 'Tab') showBoard(false); });
+// No browser context menu: it's a game, not a page. Text fields keep it, for paste.
+window.addEventListener('contextmenu', (e) => { if (!e.target.closest('input, textarea')) e.preventDefault(); });
 window.addEventListener('blur', () => showBoard(false));
 (function tagLoop() {
   if (race && race.opts.online) Net.tags();

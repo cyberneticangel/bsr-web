@@ -2,6 +2,10 @@
 # Builds web/bsr.js + web/bsr.wasm. Requires Emscripten (emcc).
 set -e
 cd "$(dirname "$0")"
+# Arch puts Emscripten on PATH only for sh/bash login shells (/etc/profile.d/emscripten.sh), not fish.
+if ! command -v em++ >/dev/null 2>&1 && [ -x /usr/lib/emscripten/em++ ]; then
+  PATH="$PATH:/usr/lib/emscripten"
+fi
 em++ -O2 -std=c++17 -Wall -Wno-unused-function \
   src/main.cpp src/game.cpp src/formats.cpp src/render.cpp src/physics.cpp src/race.cpp src/netsync.cpp src/effects.cpp \
   -sUSE_WEBGL2=1 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 \

@@ -26,6 +26,7 @@ void Game::buildCarModel(CarModel& cm, const FSO& fso, const std::map<std::strin
         for (int i = 0; i < 4; i++)
             if (n == wn[i]) { cm.wheel[i] = &p; cm.wheelCentre[i] = (p.bmin + p.bmax) * 0.5f; isWheel = true; }
         if (isWheel || n.find("coll_sphere") != std::string::npos) continue;
+        if (n.find("shadow") != std::string::npos) { cm.shadow.push_back(&p); continue; }
         cm.parts.push_back(&p);
     }
     cm.bodyLo = V3(1e9f, 1e9f, 1e9f);
@@ -110,6 +111,10 @@ Game::CarModel* Game::carModel(const std::string& cls, const std::string& skinIn
 
 bool Game::start(const RaceConfig& cfgIn) {
     stop();
+    if (menuEnvOn_) {  // back to the race's lighting; a new track sets its own below
+        gfx_.setEnv(raceEnv_);
+        menuEnvOn_ = false;
+    }
     cfg_ = cfgIn;
     const std::string t = lower(cfg_.track), weather = cfg_.weather, wxKey = lower(weather + "|" + cfg_.weatherCat);
     // Presets are named <kind>_..._<W|NW>_<R|NR>_<T|NT>: wet track, rain, thunder.
@@ -186,6 +191,7 @@ bool Game::start(const RaceConfig& cfgIn) {
         for (auto& p : cm->model.parts)
             if (lower(p.name).find("coll_sphere") != std::string::npos)
                 sph.push_back({(p.bmin + p.bmax) * 0.5f, (p.bmax.x - p.bmin.x) * 0.5f});
+        const int modelSpheres = (int)sph.size();
         // The model's collision spheres sit high (their bottoms ~7 cm above the drawn underside), so on crests,
         // kerbs and the foot of banks the nose and tail sank into the ground. Skid spheres flush with the
         // underside at the four corners keep the drawn body out of it.
@@ -204,9 +210,11 @@ bool Game::start(const RaceConfig& cfgIn) {
         r.aiLine = i % std::min<size_t>(5, meta_.aiLines.size());  // aii06 is an alternate (pit) line
         r.aiSkill = !r.ai ? 1.0f : e.skill > 0 ? clampf(e.skill, 0.5f, 1.0f) : 0.86f + 0.1f * (float)((i * 7) % 5) / 4.0f;
         r.car.setup(wc, wr, sph, spec);
+        r.car.bodySpheres = modelSpheres > 0 ? modelSpheres : -1;
         const GridSlot& gs = meta_.grid[slot];
         r.car.place(gs.pos, gs.heading, world_);
         r.prevPos = r.car.pos;
+        r.gridSlot = slot;
         r.skin = i;
         r.place = slot + 1;
         racers_.push_back(r);
@@ -308,10 +316,51 @@ void Game::placeOnLine(Racer& r) {
     r.resets++;
 }
 
+void Game::placeAtCheckpoint(Racer& r) {
+    const int ncp = (int)meta_.checkpoints.size();
+    if (r.lap == 0 && r.nextCp == 0) {  // start line not crossed yet: back to the grid
+        const GridSlot& gs = meta_.grid[r.gridSlot % meta_.grid.size()];
+        r.car.place(gs.pos, gs.heading, world_);
+    } else {
+        // Where the racing line crosses the last checkpoint passed in order, heading along the line.
+        const Gate& g = meta_.checkpoints[(r.nextCp + ncp - 1) % ncp];
+        const Path& line = meta_.aiLines[0];
+        const int n = (int)line.pts.size();
+        V3 at = (g.a + g.b) * 0.5f;
+        float d = line.dist[line.nearest(at, 0, 0)];
+        for (int i = 0; i < n; i++) {
+            const V3& p0 = line.pts[i];
+            const V3& p1 = line.pts[(i + 1) % n];
+            if (!crossed(p0, p1, g)) continue;
+            V3 e = g.b - g.a, s = p1 - p0;
+            float den = s.x * e.y - s.y * e.x;
+            float t = std::fabs(den) > 1e-6f ? ((g.a.x - p0.x) * e.y - (g.a.y - p0.y) * e.x) / den : 0.5f;
+            at = p0 + s * t;
+            d = line.dist[i] + len(s) * t;
+            break;
+        }
+        V3 dir = line.dirAt(d);
+        r.car.place(at, std::atan2(dir.y, dir.x), world_);
+        r.pathIdx = line.nearest(r.car.pos, 0, 0);
+    }
+    r.prevPos = r.car.pos;  // the jump must not count as crossing any checkpoint
+    r.flipTime = r.stuckTime = r.reverseTime = 0;
+    r.resets++;
+}
+
 void Game::resetPlayer(int p) {
     if (p < 0 || p >= (int)players_.size() || state_ == Countdown) return;
     Racer& r = racers_[players_[p].racer];
-    if (r.player == p) placeOnLine(r);
+    if (r.player == p) placeAtCheckpoint(r);
+}
+
+std::vector<int> Game::missedCheckpoints(const Racer& r) const {
+    std::vector<int> out;
+    const int ncp = (int)meta_.checkpoints.size();
+    if (r.cutTo < 0 || ncp == 0) return out;
+    for (int g = r.nextCp; g != r.cutTo; g = (g + 1) % ncp)
+        if (g >= (int)r.cutPassed.size() || !r.cutPassed[g]) out.push_back(g);
+    return out;
 }
 
 void Game::stepPhysics(float dt) {
@@ -376,9 +425,14 @@ void Game::checkpointWarnings(Racer& r, float dt) {
     for (int g = 0; g < ncp; g++) {
         if (g == r.nextCp || g == (r.nextCp + ncp - 1) % ncp) continue;  // the expected one, or the one just passed
         if (!crossed(r.prevPos, r.car.pos, meta_.checkpoints[g])) continue;
+        int ahead = (g - r.nextCp + ncp) % ncp;
+        if (ahead <= ncp / 2) {
+            if (r.cutTo < 0 || ahead > (r.cutTo - r.nextCp + ncp) % ncp) r.cutTo = g;
+            r.cutPassed.resize(ncp);
+            r.cutPassed[g] = 1;
+        }
         if (r.cpWarnTime > 0) return;
         r.cpWarnTime = 2.5f;
-        int ahead = (g - r.nextCp + ncp) % ncp;
         emitf("%s:%d", ahead <= ncp / 2 ? "missedcp" : "wrongcp", r.player);
         return;
     }
@@ -392,6 +446,10 @@ void Game::updateRace(float dt) {
             if (crossed(r.prevPos, r.car.pos, meta_.checkpoints[r.nextCp])) {
                 if (r.nextCp == 0) finishLap(r);
                 r.nextCp = (r.nextCp + 1) % ncp;
+                if (r.cutTo == r.nextCp) {  // went back through everything that was cut
+                    r.cutTo = -1;
+                    r.cutPassed.clear();
+                }
             } else {
                 checkpointWarnings(r, dt);
             }
@@ -618,11 +676,13 @@ void Game::draw() {
         if (racers_[i].gone || racers_[i].hidden) continue;
         M4 body = racers_[i].car.bodyMatrix();
         for (Part* p : carModels_[i]->parts) gfx_.drawPart(*p, body, Pass::Blend);
+        drawCarShadow(*carModels_[i], racers_[i].car);
     }
     fx_.draw(gfx_, camEye_, camRight_, camUp_);
     if (ghostVisible_) {  // translucent, after everything else so the track shows through it
         M4 body = ghost_.car.bodyMatrix();
         for (Part* p : ghostModel_->parts) gfx_.drawPart(*p, body, Pass::Blend, 0.5f);
+        drawCarShadow(*ghostModel_, ghost_.car, 0.5f);
         for (int w = 0; w < 4 && w < (int)ghost_.car.wheels.size(); w++)
             if (ghostModel_->wheel[w])
                 gfx_.drawPart(*ghostModel_->wheel[w], ghost_.car.wheelMatrix(w, ghostModel_->wheelCentre[w]), Pass::Blend, 0.5f);
@@ -637,6 +697,31 @@ void Game::draw() {
         for (size_t i = 0; i < p.pts.size(); i++) add(p.pts[i], p.pts[(i + 1) % p.pts.size()]);
         gfx_.drawLines(l, 0, 1, 0);
     }
+}
+
+// A little clearance over the collision surface, which the drawn road can sit slightly above.
+static const float kShadowLift = 0.01f;
+
+bool Game::shadowMatrix(const Car& c, M4& out, float& alpha) const {
+    Hit h;
+    if (!world_.raycast(c.pos + V3(0, 0, 0.3f), V3(0, 0, -1), 2.3f, h) || h.n.z < 0.3f) return false;
+    V3 ground = c.pos + V3(0, 0, 0.3f - h.t) + h.n * kShadowLift;
+    float rest = c.wheels.empty() ? 0.08f : -c.wheels[0].local.z + c.wheels[0].radius;  // CoM height when parked
+    alpha = clampf(1.0f - (h.t - 0.3f - rest) / 1.2f, 0.0f, 1.0f);
+    if (alpha <= 0.01f) return false;
+    V3 f = c.R.col(1);
+    f = f - h.n * dot(f, h.n);
+    if (dot(f, f) < 1e-6f) f = norm(cross(h.n, c.R.col(0)));  // nose straight up or down
+    f = norm(f);
+    out = M4::fromRT(M3::fromAxes(norm(cross(f, h.n)), f, h.n), ground) * M4::translate(V3(-c.comModel.x, -c.comModel.y, 0));
+    return true;
+}
+
+void Game::drawCarShadow(const CarModel& cm, const Car& c, float alphaMul) {
+    M4 m;
+    float a = 1;
+    if (cm.shadow.empty() || !shadowMatrix(c, m, a)) return;
+    for (Part* p : cm.shadow) gfx_.drawPart(*p, m, Pass::Blend, a * alphaMul);
 }
 
 bool Game::startPodium() {
@@ -685,6 +770,14 @@ void Game::podiumCamera(int x, int y, int w, int h) {
 }
 
 void Game::render(int w, int h) {
+    if (menuScene && menuLoaded_) {
+        renderMenu(w, h);
+        return;
+    }
+    if (menuEnvOn_) {
+        gfx_.setEnv(raceEnv_);
+        menuEnvOn_ = false;
+    }
     if (racers_.empty() || players_.empty()) return;
     if (state_ == Podium) {
         podiumCamera(0, 0, w, h);
@@ -703,6 +796,70 @@ void Game::render(int w, int h) {
         draw();
     }
     camDt_ = 0;
+}
+
+bool Game::loadMenuScene() {
+    if (menuLoaded_) return true;
+    FSO fso;
+    if (!loadFSO("menuscene.fso", fso)) return false;
+    gfx_.buildModel(fso, "", menu_);
+    menuController_.clear();
+    menuWall_ = menuChecker_ = nullptr;
+    for (Part& p : menu_.parts) {
+        std::string n = lower(p.name);
+        if (n == "m_background" || n == "m_foreground") {
+            for (Batch& b : p.batches) {
+                b.unlit = true;                     // flat, full-brightness backdrop
+                b.blend = n == "m_foreground";      // the checker is translucent
+            }
+            (n == "m_background" ? menuWall_ : menuChecker_) = &p;
+        } else if (n.rfind("m_controller", 0) == 0) {
+            menuController_.push_back(&p);
+            if (n == "m_controller") menuPivot_ = p.local.point((p.bmin + p.bmax) * 0.5f);
+        }
+    }
+    menuEnv_ = gfx_.env();
+    if (fso.sun.valid) {
+        menuEnv_.sunDir = norm(V3(-fso.sun.dir.x, -fso.sun.dir.y, -fso.sun.dir.z));
+        menuEnv_.amb = fso.sun.ambient[0];
+        menuEnv_.diff = fso.sun.diffuse[0];
+    }
+    for (int k = 0; k < 3; k++) menuEnv_.fog[k] = menuEnv_.tint[k] = 1;  // white behind, no tint
+    menuEnv_.fogStart = 1e5f;
+    menuEnv_.fogEnd = 2e5f;
+    menuLoaded_ = true;
+    return true;
+}
+
+void Game::renderMenu(int w, int h) {
+    float dt = menuNow_ < 0 ? 0.0f : (float)std::min(0.1, std::max(0.0, now_ - menuNow_));
+    menuNow_ = now_;
+    menuTime_ += dt;
+    if (!menuEnvOn_) {
+        raceEnv_ = gfx_.env();
+        menuEnvOn_ = true;
+    }
+    gfx_.setEnv(menuEnv_);
+    // The camera sits at the origin looking down +Y with a 90 degree horizontal view (at 4:3): the planes are
+    // one 20-unit tile wider than that on each side, the room they slide in before wrapping.
+    float aspect = (float)w / std::max(h, 1);
+    float fovy = 2 * std::atan(1.0f / std::max(aspect, 4.0f / 3.0f));
+    V3 eye(0, 0, 0);
+    gfx_.beginFrame(0, 0, w, h, M4::lookAt(eye, V3(0, 1, 0), V3(0, 0, 1)), M4::perspective(fovy, aspect, 1.0f, 200.0f), eye);
+    auto wrap = [](float v) {  // into [-10, 10): the planes repeat every 20 units
+        v = std::fmod(v + 10.0f, 20.0f);
+        return (v < 0 ? v + 20.0f : v) - 10.0f;
+    };
+    float t = menuTime_;
+    M4 wall = M4::translate(V3(wrap(-1.2f * t), 0, wrap(-0.8f * t)));
+    M4 checker = M4::translate(V3(wrap(1.6f * t), 0, wrap(1.2f * t)));
+    M4 spin = M4::translate(menuPivot_) * M4::rotZ(0.8f * t) * M4::translate(-menuPivot_);
+    gfx_.fogOff = true;
+    if (menuWall_) gfx_.drawPart(*menuWall_, wall, Pass::Opaque);
+    for (Part* p : menuController_) gfx_.drawPart(*p, spin, Pass::Opaque);
+    for (Part* p : menuController_) gfx_.drawPart(*p, spin, Pass::Blend);
+    if (menuChecker_) gfx_.drawPart(*menuChecker_, checker, Pass::Blend);
+    gfx_.fogOff = false;
 }
 
 bool Game::renderPreview(const std::string& clsIn, const std::string& skin, int w, int h, std::vector<uint8_t>& rgba) {
@@ -727,6 +884,7 @@ bool Game::renderPreview(const std::string& clsIn, const std::string& skin, int 
     for (int k = 0; k < 4; k++)
         if (cm->wheel[k]) gfx_.drawPart(*cm->wheel[k], M4(), Pass::Opaque);
     for (Part* p : cm->parts) gfx_.drawPart(*p, M4(), Pass::Blend);
+    for (Part* p : cm->shadow) gfx_.drawPart(*p, M4(), Pass::Blend);
     gfx_.fogOff = false;
     gfx_.endOffscreen(rgba);
     gfx_.release(cm->model);
@@ -748,7 +906,54 @@ std::string Game::hudJson(int pl) const {
              p.finished ? "true" : "false", players_[pl].camMode, waiting ? "true" : "false",
              cfg_.seconds > 0 ? std::max(0.0f, cfg_.seconds - raceTime_) : -1.0f, cfg_.practice ? "true" : "false",
              p.car.rpm, p.car.spec.topSpeed * 3.6f);
-    return buf;
+    // Map: the player's car (position, heading), the other cars, the next and the missed checkpoints.
+    std::string out(buf, strlen(buf) - 1);
+    V3 f = p.car.R.col(1);
+    snprintf(buf, sizeof buf, ",\"x\":%.2f,\"y\":%.2f,\"hd\":%.3f,\"next\":%d,\"missed\":[", p.car.pos.x,
+             p.car.pos.y, std::atan2(f.y, f.x), p.nextCp);
+    out += buf;
+    std::vector<int> missed = missedCheckpoints(p);
+    for (size_t i = 0; i < missed.size(); i++) out += (i ? "," : "") + std::to_string(missed[i]);
+    // Passed this lap: the gates before the next one (all but the line once the lap is done), and the ones
+    // crossed early after a cut. Before the first crossing of the start line nothing counts.
+    out += "],\"passed\":[";
+    const int ncp = (int)meta_.checkpoints.size();
+    bool firstPassed = true;
+    for (int g = 0; g < ncp && p.lap > 0; g++) {
+        bool passed = p.nextCp == 0 ? g > 0 : g < p.nextCp;
+        if (g < (int)p.cutPassed.size() && p.cutPassed[g]) passed = true;
+        if (!passed) continue;
+        out += (firstPassed ? "" : ",") + std::to_string(g);
+        firstPassed = false;
+    }
+    out += "],\"cars\":[";
+    bool first = true;
+    for (const Racer& r : racers_) {
+        if (&r == &p || r.gone || r.hidden) continue;
+        snprintf(buf, sizeof buf, "%s[%.2f,%.2f]", first ? "" : ",", r.car.pos.x, r.car.pos.y);
+        out += buf;
+        first = false;
+    }
+    return out + "]}";
+}
+
+std::string Game::mapJson() const {
+    if (meta_.aiLines.empty()) return "{}";
+    const Path& line = meta_.aiLines[0];
+    std::string out = "{\"line\":[";
+    char buf[96];
+    const int n = (int)line.pts.size(), step = std::max(1, n / 300);
+    for (int i = 0; i < n; i += step) {
+        snprintf(buf, sizeof buf, "%s[%.2f,%.2f]", i ? "," : "", line.pts[i].x, line.pts[i].y);
+        out += buf;
+    }
+    out += "],\"cps\":[";
+    for (size_t i = 0; i < meta_.checkpoints.size(); i++) {
+        const Gate& g = meta_.checkpoints[i];
+        snprintf(buf, sizeof buf, "%s[%.2f,%.2f,%.2f,%.2f]", i ? "," : "", g.a.x, g.a.y, g.b.x, g.b.y);
+        out += buf;
+    }
+    return out + "]}";
 }
 
 std::string Game::resultsJson() const {

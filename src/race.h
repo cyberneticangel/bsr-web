@@ -43,6 +43,9 @@ struct Racer {
     int pathIdx = 0;
     float progress = 0;     // along ai line 0
     int nextCp = 0;
+    int cutTo = -1;         // furthest checkpoint crossed ahead of nextCp (-1: none); nextCp..cutTo still count
+    std::vector<char> cutPassed;  // per checkpoint: crossed out of order since the cut (so not missed, just early)
+    int gridSlot = 0;
     int lap = 0;            // laps started (crossing start line increments)
     bool finished = false;
     float finishTime = 0;

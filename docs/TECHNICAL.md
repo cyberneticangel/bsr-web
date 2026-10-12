@@ -8,7 +8,7 @@ The project runs *Big Scale Racing* (BumbleBeast, 2002, Windows/Direct3D 7) in a
 
 | Area | Reproduced | Not reproduced |
 | --- | --- | --- |
-| Content | 6 tracks, 11 car classes, 12 team skins per class, the original weather categories (incl. rain) on every track, 3 announcer voices, all music | Original menu graphics, bonus tracks |
+| Content | 6 tracks, 11 car classes, 12 team skins per class, the original weather categories (incl. rain) on every track, 3 announcer voices, all music | The original menu panels (the 3D menu backdrop is reproduced), bonus tracks |
 | Gameplay | Grid starts, checkpoints (with missed-checkpoint warnings), laps or timed races, Cup and Open races, positions, results, AI opponents on the original racing lines, practice with ghost laps, championships with unlocks, podium ceremony, two-player split-screen | Pit stops, false starts, replays |
 | Multiplayer (new) | Online races for up to 8 players through a WebSocket relay, with AI cars run by the host | — |
 | Simulation | New raycast-suspension car model tuned to the original top speeds | The original `bamms.dll` multibody physics |
@@ -180,7 +180,7 @@ The renderer is a single WebGL2 (GLES 3.0) shader pair that reproduces the origi
 | Alpha test | Texture has any alpha < 255 | Discard below 0.5, drawn two-sided |
 | Blend | Name contains `schaduw`, `shadow` or `fx_` | Second pass, depth write off, polygon offset |
 
-Draw order per frame: track opaque, cars opaque (body plus four wheel matrices), track blended, car shadows blended. Fog is linear between the weather's start and end distances, mixed at most 85%.
+Draw order per frame: track opaque, cars opaque (body plus four wheel matrices), track blended, car shadows blended. A car's `m_shadow` quad is not drawn with the body: it lies on the ground under the centre of mass (a downward ray), turned with the car's heading but without its roll or pitch, 1 cm up, fading out over 1.2 m of height. Fog is linear between the weather's start and end distances, mixed at most 85%.
 
 ### Weather and effects
 
@@ -220,10 +220,10 @@ The original `bamms.dll` multibody solver is replaced by a fixed-step (240 Hz) r
 | Chassis contacts | The model's `m_coll_sphere_NN` spheres against the world, plus four 2.5 cm skid spheres flush with the body's underside at its corners; impulse with inertia | Restitution 0.25, friction 0.3 |
 | Wheel rays | Start 10 cm above the suspension mount, so a mount pushed into a bank still finds the surface (bump stop pushes it out) | Drawn wheels follow the ground up to half a radius past the bump stop |
 | Wet grip | Wet or rainy track | μ × 0.9 (wet), × 0.85 (rain) |
-| Car to car | Two spheres per car along its axis, equal-and-opposite impulses | Restitution 0.3 |
+| Car to car | Both cars' `m_coll_sphere_NN` spheres (not the skid spheres), so nose and rear wing collide; the deepest overlap is resolved, its normal mostly horizontal, equal-and-opposite impulses | Restitution 0.3 |
 | Grid hold | `hold` flag locks the wheels during the countdown | — |
 
-The car reports `rpm`, `skid` and `impact` each step for the audio layer, and a per-wheel `slide` (sideways slip, or locked under braking/handbrake) for tire smoke and skid marks.
+The car reports `rpm`, `skid` and `impact` each step (`rpm` follows the wheels, revs with the throttle from a standstill as through a clutch, rises with wheelspin and in the air, and eases up and down; above top speed it flutters on a limiter) for the audio layer and the rev meter, and a per-wheel `slide` (sideways slip, or locked under braking/handbrake) for tire smoke and skid marks.
 
 The model's own collision spheres sit about 7 cm above the drawn underside, which rests only 1–2 cm off the ground; before the skid spheres the nose and tail sank into the ground over crests and at the foot of banks. `CHAOS=seed` in the harness drives erratically and reports how many frames any car's drawn body or wheels were inside the ground.
 
@@ -242,9 +242,10 @@ The model's own collision spheres sit about 7 cm above the drawn underside, whic
 - **States:** Countdown (4 s, cars held; online it is held until every player has loaded) → Racing → Finished (every local player done; the rest keep driving and finished players switch to autopilot) → Podium (prize ceremony: no physics, one view).
 - **Config:** `Game::start(RaceConfig)`: track, weather preset and category, laps or seconds, practice, ghost, and per car a class, skin, top speed, role and optional AI pace. The page passes it as one string (`parseRaceConfig`: `track=mach;laps=3;cars=pro_std,skin,58,0|junior_std,skin,37,a|...`). Roles: `0`/`1` local player, `a` AI simulated here, `r` remote.
 - **Laps:** each racer must cross its next checkpoint gate in order (2D segment intersection between frames); crossing gate 01 starts a lap, and passing it after the last lap finishes the race. Timed races: once time is up, each car finishes at its next line crossing. Practice never finishes.
-- **Checkpoint warnings:** a local player crossing a gate other than the next one (or the one just passed) gets `missedcp` (it was ahead: they cut the track) or `wrongcp` (out of order), at most every 2.5 s.
+- **Checkpoint warnings:** a local player crossing a gate other than the next one (or the one just passed) gets `missedcp` (it was ahead: they cut the track) or `wrongcp` (out of order), at most every 2.5 s. The gates a `missedcp` skipped (not driven through since) pulse red on the HUD map until the player goes back through them.
+- **Map:** `bsr_map` gives the racing line and gates once per race; the HUD JSON adds the player's position and heading, the other cars, the next gate, the missed ones and the ones passed this lap, drawn top left: passed gates green, the rest red (the next one larger).
 - **Standings:** finishers by laps, then finish time; then laps × 1000 + checkpoints × 10 − distance to the next gate.
-- **Resets:** upside down for 1.5 s (player) or 1 s (AI), or falling below the track → respawn on the racing line; the player can press R.
+- **Resets:** upside down for 1.5 s (player) or 1 s (AI), or falling below the track → respawn on the racing line; R puts the player where the racing line crosses the last gate passed in order (before the first start line crossing: their grid slot).
 
 ### Game modes
 
@@ -252,6 +253,7 @@ The model's own collision spheres sit about 7 cm above the drawn underside, whic
 - **Practice:** alone on the track; a translucent ghost replays your best or last lap (snapshots every 50 ms of lap time, kept per track and class while the page is open).
 - **Championship:** the original's ten class cups and the open BSR championship (`game.js`, `Champ`). A season is six races, one per track, against seven named AI drivers with a fixed pace; 10-8-6-5-4-3-2-1 points plus one for the win; the grid in reverse championship order. A top-three finish wins a cup and unlocks the next championship. Saved in `localStorage`.
 - **Podium:** after a race the top three stand on the track's podium (`podiumpos01–03`, the rest in front) behind their cups (`prizes_track.fso` at `prizepos01–03`), filmed by a sweeping camera, with the podium or "nopodium" theme.
+- **Menu backdrop:** behind the menu and the results after the ceremony (online, while others still race, the live race stays), the engine draws the original `Menuscene.fso`, animated as in the executable (`0x41e200`): the camera at the origin looking along +Y with a 90° horizontal view, the logo wall sliding at (−1.2, −0.8) units/s and the checker in front of it at (1.6, 1.2), each wrapping every 20 units (one tile), and the transmitter turning about its own centre at 0.8 rad/s.
 
 ### Cameras
 
@@ -292,6 +294,7 @@ The relay forwards states between players, so latency is two hops through the se
 | `bsr_init` | — | Create the context and start the main loop; returns 0 without WebGL2 |
 | `bsr_start` | race config string (see Race flow) | Load and begin a race; returns the number of cars, 0 on failure |
 | `bsr_podium` | — | Start the prize ceremony |
+| `bsr_menu` | 0/1 | Draw the original menu backdrop (`Menuscene.fso`) instead of the race; returns 1 if shown |
 | `bsr_preview` | class, skin, w, h | Render a car on a transparent background (menu); returns a pointer to RGBA pixels |
 | `bsr_speakers` | — | Trackside speaker positions (JSON), for localized music |
 | `bsr_screen` | remote only | Cars on screen in player 0's view (JSON), for name tags |
@@ -329,7 +332,7 @@ Audio is decoded in JavaScript, not WASM. `.fsw` files are parsed as RIFF, the `
 
 ### Input and frame loop
 
-- Keyboard: arrows/WASD, Space handbrake, C camera, R reset, P or Esc pause, F2 debug lines (split-screen bindings above). Steering ramps at 3.5/s (6/s back to centre) to mimic an RC transmitter.
+- Keyboard: arrows/WASD (ignored while the menu is open or a text field has focus, so they can be typed), Space handbrake, C camera, R reset, P or Esc pause, F2 debug lines (split-screen bindings above). Steering ramps at 3.5/s (6/s back to centre) to mimic an RC transmitter.
 - Gamepad: left stick, RT/LT analog, A/X/B buttons; the pad state is sampled before counting pads (the reverse order crashes in Emscripten).
 - Touch: a steering pad and gas/brake buttons, shown only on touch devices.
 - Each frame resizes the canvas to CSS size × devicePixelRatio, runs `Game::update` (physics substeps at 240 Hz) and renders. A hidden tab pauses the race.
@@ -366,7 +369,7 @@ OPP=7 LAPS=3 tools/harness/harness web/data baanbreker pro_std /tmp/shots 150 5 
 node tools/nodetest.js mach pro_std 50
 ```
 
-Harness options are environment variables: `CAM` (0–2), `OPP`, `LAPS`, `TOP` (km/h), `SKINS`, `WEATHER`, `DEBUG` (draw checkpoints and the AI line), `MANUAL` (full throttle, no autopilot), `TRACE`/`TRACE_CAR` (per-0.5 s car state). `tools/montage.py` tiles screenshots into a contact sheet.
+Harness options are environment variables: `CAM` (0–2), `OPP`, `LAPS`, `TOP` (km/h), `SKINS`, `WEATHER`, `DEBUG` (draw checkpoints and the AI line), `MANUAL` (full throttle, no autopilot), `TRACE`/`TRACE_CAR` (per-0.5 s car state), `MENU` (the menu backdrop at each shot time, 16:9 and 4:3). `tools/montage.py` tiles screenshots into a contact sheet.
 
 The tests found bugs that a browser would have hit: the gamepad call order, cars reversing on the grid during the countdown, AI cars stuck behind walls, and a lap event firing after the finish.
 

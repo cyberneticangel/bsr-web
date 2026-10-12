@@ -47,7 +47,7 @@ python3 tools/devserver.py 8000
 | Steer | ← → or A D | left stick |
 | Handbrake | Space | B |
 | Camera (follow / follow 2 / follow 3 / bumper / tower / TV) | C | |
-| Reset car onto the track | R | |
+| Reset car to the last checkpoint | R | |
 | Pause | P or Esc | |
 | Standings / players in the room | Tab (hold) | |
 | Debug lines (checkpoints, AI line) | F2 | |
