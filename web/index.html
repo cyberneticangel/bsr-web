@@ -37,6 +37,7 @@
 </template>
 
 <div id="tags"></div>
+<div id="race-leaders" class="leaders hidden"></div>
 <div id="board" class="panel hidden">
   <h2 id="board-title">STANDINGS</h2>
   <table id="board-table"></table>
@@ -85,12 +86,15 @@
   <div class="row" id="row-track"><label>Track</label><div id="tracks" class="choices"></div></div>
   <div class="row" id="row-cls"><label>Class</label><select id="cls"></select></div>
   <div class="row" id="row-weather"><label>Weather</label><select id="weather"></select></div>
+  <div id="menu-leaders" class="leaders"></div>
   <div class="row" id="row-skin"><label id="skin-label">Skin</label><div id="skins" class="choices skins"></div></div>
   <div class="row hidden" id="row-skin2"><label>P2 skin</label><div id="skins2" class="choices skins"></div></div>
   <div class="row" id="row-racetype"><label>Race type</label><div id="racetype" class="choices">
     <button data-v="cup" title="Only opponents of your class">Cup race</button><button data-v="open" title="Opponents from all classes">Open race</button>
   </div></div>
   <div class="row" id="row-opp"><label id="opp-label">Opponents</label><input id="opp" type="range" min="0" max="7" value="5"><span id="opp-v">5</span></div>
+  <div class="row" id="row-difficulty"><label>AI level</label><div id="difficulty" class="choices">
+    <button data-v="easy">Easy</button><button data-v="normal">Normal</button><button data-v="hard">Hard</button></div></div>
   <div class="row" id="row-length"><label>Length</label><div id="lenmode" class="choices">
     <button data-v="laps">Laps</button><button data-v="time">Time</button></div>
     <span id="len-laps" class="len"><input id="laps" type="range" min="1" max="10" value="3"><span id="laps-v">3</span></span>
@@ -123,6 +127,7 @@
 <div id="results" class="panel hidden">
   <h2>RESULTS</h2>
   <table id="res-table"></table>
+  <div id="res-leaders" class="leaders hidden"></div>
   <p id="res-note" class="sub"></p>
   <button id="again" class="big">RACE AGAIN</button>
   <button id="tomenu">MENU</button>

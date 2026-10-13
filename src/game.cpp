@@ -208,7 +208,7 @@ bool Game::start(const RaceConfig& cfgIn) {
         r.remote = role == 'r';
         r.ai = r.player < 0 && !r.remote;
         r.aiLine = i % std::min<size_t>(5, meta_.aiLines.size());  // aii06 is an alternate (pit) line
-        r.aiSkill = !r.ai ? 1.0f : e.skill > 0 ? clampf(e.skill, 0.5f, 1.0f) : 0.86f + 0.1f * (float)((i * 7) % 5) / 4.0f;
+        r.aiSkill = !r.ai ? 1.0f : e.skill > 0 ? clampf(e.skill, 0.3f, 1.3f) : 0.86f + 0.1f * (float)((i * 7) % 5) / 4.0f;
         r.car.setup(wc, wr, sph, spec);
         r.car.bodySpheres = modelSpheres > 0 ? modelSpheres : -1;
         const GridSlot& gs = meta_.grid[slot];

@@ -129,7 +129,7 @@ void driveAI(Racer& r, const TrackMeta& meta, float dt) {
     for (float s = 0.0f; s <= horizon; s += 0.5f) {
         V3 a = line.dirAt(d0 + s - 0.6f), b = line.dirAt(d0 + s + 0.6f);
         float k = std::acos(clampf(dot(a, b), -1, 1)) / 1.2f;  // curvature 1/R
-        float vc = std::sqrt(aLat / std::max(k, 1e-3f)) * (0.85f + 0.15f * r.aiSkill);
+        float vc = std::sqrt(aLat / std::max(k, 1e-3f)) * (r.aiSkill <= 1 ? 0.85f + 0.15f * r.aiSkill : r.aiSkill);
         targetV = std::min(targetV, std::sqrt(vc * vc + 2 * aBrake * s));
     }
     targetV = std::max(targetV, 3.0f);

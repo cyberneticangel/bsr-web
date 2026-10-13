@@ -5,3 +5,5 @@ iso/
 work/
 tools/harness/harness
 __pycache__/
+leaderboard.json
+leaderboard.json.tmp

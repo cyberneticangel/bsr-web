@@ -1,0 +1,11 @@
+# Build context for the Containerfile (podman/buildah read this file too when there is no .containerignore).
+# Only tools/devserver.py and web/ go into the image: keep the 600 MB of original install files out of the context.
+.git
+game
+iso
+work
+docs
+src
+leaderboard.json*
+tools/harness
+**/__pycache__

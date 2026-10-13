@@ -233,7 +233,7 @@ The model's own collision spheres sit about 7 cm above the drawn underside, whic
 
 1. Find the nearest line point within ±40 samples of the last one.
 2. Steer toward a point `0.7 + 0.28 × speed` metres ahead (gain 1.6, clamped).
-3. Limit speed: for every point within braking distance, curvature k gives a corner speed √(0.8 μ g / k); the target is the lowest of √(v² + 2 × 5 m/s² × distance). Skill (0.86–0.96 per car) scales top and corner speed.
+3. Limit speed: for every point within braking distance, curvature k gives a corner speed √(0.8 μ g / k); the target is the lowest of √(v² + 2 × 5 m/s² × distance). Skill scales top speed (× skill) and corner speed (× 0.85 + 0.15 skill up to 1, × skill above: it corners harder than the autopilot). The menu's AI level sets it per car: Easy 0.45–0.50, Normal 0.86–0.96, Hard 1.05–1.15 (the engine accepts 0.3–1.3; 0 means Normal by grid slot). Measured with the harness (`SKILL=x`) in Pro cars on every track, Easy laps are 12–25 % slower than Normal and Hard 1–4 % faster; Hard is grip-limited, so higher values gain almost nothing. In championships the drivers keep their order within the level's range; online the host's level counts, since the host runs the AI cars.
 4. Throttle or brake proportionally to the speed error.
 5. Recover: below 0.4 m/s with throttle for 1 s → reverse with opposite lock for 1 s; three such episodes within 8 s → respawn on the line.
 
@@ -273,6 +273,7 @@ Each browser simulates only its own car; the host also simulates the AI cars. Th
 4. **Contact.** Car-to-car collisions run on both machines, but each side only moves its own car (`collideCars(a, b, moveA, moveB)`), so two players bumping each other both feel it without fighting over the other car.
 5. **Status.** The relay answers `{"t":"ping"}` itself. Every 2 s each client measures its round trip and tells the room `{"t":"stat", ping, state}`. Tab shows the room (place, class, team, progress, ping, plus members not in this race); other players' cars carry name tags with a connection dot and the estimated latency (half of both round trips), or "lag" when no state arrived for 1 s (`bsr_screen` projects the cars).
 6. **Leaving.** A player who leaves or disconnects is removed from everyone's race; if the host leaves, the AI cars go too and the longest-standing player becomes host. Online races can't be paused.
+7. **Leaderboard.** Every lap a player completes in an online race goes to the relay as `{"t":"lap", track, cls, time}`. The relay keeps the top 10 per track and class, one entry per player name (their best), in `leaderboard.json` (`--leaderboard FILE`). When a lap makes the board, the whole room gets the new board with the setter's id and place, and the setter's HUD flashes it. Clients ask with `{"t":"board", track, cls}` (over a query-only socket when not in a room) to show the selected track and class in the menu, beside the race and on the results, in every mode but the championship; F5 collapses it. Times are taken on trust, like everything else here.
 
 The relay forwards states between players, so latency is two hops through the server. The interpolation delay hides jitter and short losses (tested natively: at 9.4 m/s with 15 ms jitter and 5 % loss, remote cars stay within 3 cm of the true delayed path).
 

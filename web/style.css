@@ -41,6 +41,21 @@ input[type=text] { flex: 1; min-width: 90px; background: #1c2028; color: var(--f
 #net-players { list-style: none; margin: 0 0 6px 102px; padding: 0; font-size: 14px; }
 #net-players li { padding: 3px 0; }
 #net-players .tag { color: var(--muted); font-size: 12px; margin-left: 6px; }
+/* Online leaderboard: top lap times per track and class, kept by the relay. */
+.leaders h3 { margin: 14px 0 6px; font-size: 13px; letter-spacing: 1px; color: var(--accent); text-transform: uppercase; }
+.leaders h3 small { color: var(--muted); font-weight: normal; }
+.leaders .table td:first-child { width: 2em; color: var(--muted); }
+.leaders .table td.date { color: var(--muted); font-size: 12px; }
+.leaders .sub { margin: 4px 0 8px; text-align: left; }
+.leaders h3 { cursor: pointer; display: flex; gap: 6px; align-items: baseline; }
+.leaders h3 .key { margin-left: auto; font-size: 11px; letter-spacing: 0; text-transform: none; }
+#race-leaders { position: fixed; left: 16px; top: 50%; transform: translateY(-50%); width: 270px; padding: 2px 12px 6px;
+  background: rgba(14, 17, 22, 0.72); border-radius: 8px; pointer-events: none; }
+#race-leaders h3 { margin-top: 8px; }
+#race-leaders .table { font-size: 13px; margin: 0; }
+#race-leaders .table td { padding: 3px 6px; }
+#race-leaders .date { display: none; }
+@media (max-width: 600px) { #race-leaders { display: none; } }
 button:disabled, select:disabled, input:disabled { opacity: .45; cursor: default; }
 button:disabled:hover { border-color: #3a404a; }
 select { background: #1c2028; color: var(--fg); border: 1px solid #3a404a; border-radius: 6px; padding: 6px; font-size: 14px; }
