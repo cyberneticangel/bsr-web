@@ -77,6 +77,20 @@ python3 tools/devserver.py 8000 --host 0.0.0.0
 
 A page served from elsewhere (e.g. static hosting) can point at a relay with `?server=wss://host/ws`.
 
+## Hosting (container)
+
+The `Containerfile` packages the whole game: the page, the engine, the packed data in `web/data` (run steps 1–2
+of Build first) and the server with the online rooms and the leaderboard.
+
+```sh
+podman build -t bsr-web .                       # or: docker build -f Containerfile -t bsr-web .
+podman run -d --name bsr -p 8000:8000 -v bsr-data:/var/lib/bsr bsr-web
+```
+
+The leaderboard lives in the `bsr-data` volume. For HTTPS put a reverse proxy in front that passes WebSocket
+upgrades on `/ws`; the game then connects with `wss://` by itself. The image contains the original game data,
+which is copyrighted: don't push it to a public registry.
+
 ## Layout
 
 ```

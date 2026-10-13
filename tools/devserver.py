@@ -6,6 +6,7 @@ usage: devserver.py [port] [shot_dir] [--host ADDR] [--leaderboard FILE]
   --leaderboard is where the online lap times are kept (default: leaderboard.json next to web/).
 
 GET  /ws                                  -> WebSocket: multiplayer rooms and the lap leaderboard (see Relay below)
+The POST endpoints exist only for the smoke test, when shot_dir is given (never on a public server):
 POST /shot?n=<i>  body = canvas data URL  -> <shot_dir>/shot<i>.png
 POST /log         body = text             -> printed
 POST /done                                -> server exits
@@ -18,6 +19,7 @@ import json
 import os
 import random
 import re
+import signal
 import socket
 import struct
 import threading
@@ -321,11 +323,14 @@ class H(http.server.SimpleHTTPRequestHandler):
             super().do_GET()
 
     def do_POST(self):
+        if not self.shots:  # anyone could stop the server or fill its log
+            self.send_error(404)
+            return
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
-        if u.path == '/shot' and self.shots:
-            n = q.get('n', ['0'])[0]
+        if u.path == '/shot':
+            n = int(q.get('n', ['0'])[0])
             data = body.split(b',', 1)[1]
             os.makedirs(self.shots, exist_ok=True)
             with open(os.path.join(self.shots, 'shot%s.png' % n), 'wb') as f:
@@ -351,5 +356,14 @@ if __name__ == '__main__':
     RELAY.leaderboard = Leaderboard(args.leaderboard)
     server = http.server.ThreadingHTTPServer((args.host, args.port), H)
     server.daemon_threads = True
+
+    def stop(*_):
+        raise SystemExit(0)
+    # As a container's PID 1 the process ignores SIGTERM unless it handles it: stop on `docker/podman stop`
+    # right away instead of after the kill timeout. (Leaderboard saves are atomic, so stopping anywhere is safe.)
+    signal.signal(signal.SIGTERM, stop)
     print('serving web/ on http://%s:%d' % (args.host, args.port), flush=True)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    except (KeyboardInterrupt, SystemExit):
+        print('stopped', flush=True)
