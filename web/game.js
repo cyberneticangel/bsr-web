@@ -19,13 +19,14 @@ const MAX_RACERS = 8;  // grid slots on every track
 const Settings = {
   musicMode: 'stereo',  // stereo | localized (from the trackside speakers) | off
   showLeaders: true,    // online top laps in the menu, race and results (F5)
+  difficulty: 'normal', // AI opponents: easy | normal | hard (see aiSkill)
   genres: { surf: true, rock: true, dance: true },
   load() {
     try { Object.assign(this, JSON.parse(localStorage.getItem('bsr-settings')) || {}); } catch (e) {}
   },
   save() {
-    const { musicMode, genres, hudScale, hudStyle, showLeaders } = this;
-    try { localStorage.setItem('bsr-settings', JSON.stringify({ musicMode, genres, hudScale, hudStyle, showLeaders })); } catch (e) {}
+    const { musicMode, genres, hudScale, hudStyle, showLeaders, difficulty } = this;
+    try { localStorage.setItem('bsr-settings', JSON.stringify({ musicMode, genres, hudScale, hudStyle, showLeaders, difficulty })); } catch (e) {}
   },
 };
 Settings.load();
@@ -34,6 +35,15 @@ let manifest = null;
 const loaded = new Set();
 const sel = { mode: 'single', track: 'baanbreker', cls: 'pro_std', skin: 0, skin2: 1, raceType: 'cup', lenMode: 'laps', ghost: 1 };
 const RACE_MINUTES = [1, 2, 3, 5, 10, 20];
+// AI pace (the engine's skill: top speed and cornering speed, above 1 it corners harder than the autopilot) per
+// difficulty: [slowest, fastest] car. Measured with the harness (SKILL=x) on every track in Pro cars, against
+// Normal: Easy laps 12-25 % slower, Hard 1-4 % faster.
+const DIFFICULTY = { easy: [0.45, 0.5], normal: [0.86, 0.96], hard: [1.05, 1.15] };
+// k: 0..1, the car's place in the field's spread (0 the slowest).
+function aiSkill(k, level = Settings.difficulty) {
+  const [lo, hi] = DIFFICULTY[level] || DIFFICULTY.normal;
+  return +(lo + (hi - lo) * Math.min(1, Math.max(0, k))).toFixed(3);
+}
 // Camera modes (Game::Cam): the original's views from Tracks/<track>_cams.bin.
 const CAMERAS = ['FOLLOW', 'FOLLOW 2', 'FOLLOW 3', 'BUMPER', 'TOWER', 'TV'];
 // Menu weather, as in the original. Each track's <track>_weather_<cat>.bin lists the presets a category picks from.
@@ -504,7 +514,8 @@ const Champ = {
     const grid = this.standings();
     return {
       champ: true, track: CHAMP_TRACKS[a.round % CHAMP_TRACKS.length], cls: a.cls, laps: 3, minutes: 0, weather: 'random',
-      racers: grid.map((d) => ({ role: d.me ? '0' : 'a', cls: d.cls, skin: d.skin, name: d.name, skill: d.skill,
+      racers: grid.map((d) => ({ role: d.me ? '0' : 'a', cls: d.cls, skin: d.skin, name: d.name,
+        skill: d.me ? 0 : aiSkill((d.skill - 0.86) / 0.11),  // d.skill: the driver's rank in the field, 0.86..0.97
         driver: a.drivers.indexOf(d) })),
     };
   },
@@ -617,6 +628,12 @@ function buildMenu() {
   choice('racetype', 'raceType');
   choice('lenmode', 'lenMode');
   choice('ghost', 'ghost', Number);
+  for (const b of $('difficulty').children) b.onclick = () => {
+    Settings.difficulty = b.dataset.v;
+    Settings.save();
+    refreshSel();
+    Audio.play('menu_leftright', 0.5);
+  };
   for (const b of $('musicmode').children) b.onclick = () => {
     Settings.musicMode = b.dataset.v;
     Settings.save();
@@ -713,6 +730,9 @@ function refreshSel() {
   for (const b of $('racetype').children) b.classList.toggle('sel', b.dataset.v === sel.raceType);
   for (const b of $('lenmode').children) b.classList.toggle('sel', b.dataset.v === sel.lenMode);
   for (const b of $('ghost').children) b.classList.toggle('sel', +b.dataset.v === sel.ghost);
+  const level = online && !Net.isHost() && Net.connected() ? sel.hostDifficulty || 'normal' : Settings.difficulty;
+  for (const b of $('difficulty').children) b.classList.toggle('sel', b.dataset.v === level);
+  $('row-difficulty').classList.toggle('hidden', practice);
   $('len-laps').classList.toggle('hidden', sel.lenMode !== 'laps');
   $('minutes').classList.toggle('hidden', sel.lenMode !== 'time');
   const champ = sel.mode === 'champ';
@@ -736,7 +756,7 @@ function refreshSel() {
   // Online guests see the host's settings but can't change them; they only pick their own skin.
   const guest = online && !Net.isHost();
   for (const b of $('tracks').children) b.disabled = guest;
-  for (const id of ['racetype', 'lenmode']) for (const b of $(id).children) b.disabled = guest;
+  for (const id of ['racetype', 'lenmode', 'difficulty']) for (const b of $(id).children) b.disabled = guest;
   for (const id of ['weather', 'opp', 'laps', 'minutes']) $(id).disabled = guest;
   $('cls').disabled = guest && sel.raceType !== 'open';  // open races: everyone brings their own class
   const go = $('go');
@@ -863,7 +883,7 @@ function localLineup(opts) {
   for (let i = 0; i < ai; i++) {
     const cls = opts.raceType === 'open' ? randomClass(opts.cls) : opts.cls;
     const skin = cls === opts.cls ? free[i % free.length] : Math.floor(Math.random() * manifest.classes[cls].skins.length);
-    racers.push({ role: 'a', cls, skin, name: 'CPU' });
+    racers.push({ role: 'a', cls, skin, name: 'CPU', skill: aiSkill(((i * 7) % 5) / 4) });
   }
   return racers;
 }
@@ -1287,7 +1307,7 @@ const Net = {
   pushSettings() {
     if (!this.isHost()) return;
     const s = { track: sel.track, cls: sel.cls, weather: $('weather').value, opponents: +$('opp').value, laps: +$('laps').value,
-      minutes: +$('minutes').value, lenMode: sel.lenMode, raceType: sel.raceType };
+      minutes: +$('minutes').value, lenMode: sel.lenMode, raceType: sel.raceType, difficulty: Settings.difficulty };
     const key = JSON.stringify(s);
     if (key === this.settings) return;
     this.settings = key;
@@ -1297,6 +1317,7 @@ const Net = {
     if (manifest.tracks[m.track]) sel.track = m.track;
     sel.raceType = m.raceType === 'open' ? 'open' : 'cup';
     sel.lenMode = m.lenMode === 'time' ? 'time' : 'laps';
+    if (DIFFICULTY[m.difficulty]) sel.hostDifficulty = m.difficulty;  // shown only: the host runs the AI cars
     // Cup races use the host's class; in open races everyone keeps their own.
     if (sel.raceType === 'cup' && manifest.classes[m.cls] && sel.cls !== m.cls) { sel.cls = m.cls; sel.skin = 0; this.sendProfile(); }
     $('cls').value = sel.cls;
@@ -1342,7 +1363,7 @@ const Net = {
     for (let i = 0; i < ai; i++) {
       const cls = open ? randomClass(sel.cls) : sel.cls;
       const skin = cls === sel.cls ? free[i % free.length] : Math.floor(Math.random() * manifest.classes[cls].skins.length);
-      lineup.push({ peer: 0, name: 'CPU', cls, skin });
+      lineup.push({ peer: 0, name: 'CPU', cls, skin, skill: aiSkill(((i * 7) % 5) / 4) });
     }
     const msg = {
       t: 'race', race: 1 + Math.floor(Math.random() * 0xfffffe),  // exact as a float32: tags state packets
@@ -1362,7 +1383,7 @@ const Net = {
       laps: m.laps, minutes: m.minutes | 0,
       song: m.song,
       racers: m.lineup.map((e, i) => ({ role: roles[i], cls: manifest.classes[e.cls] ? e.cls : m.cls, skin: e.skin,
-        name: e.peer === this.id ? 'You' : e.name })),
+        name: e.peer === this.id ? 'You' : e.name, skill: +e.skill || 0 })),
     };
     const r = this.race = {
       id: m.race, opts, lineup: m.lineup, ready: new Set(), started: false, go: false,

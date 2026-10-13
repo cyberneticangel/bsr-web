@@ -32,7 +32,7 @@ struct CarEntry {
     std::string skin;         // body texture
     float topSpeedKmh = 50;
     char role = 'a';          // '0'/'1' local human player, 'a' AI simulated here, 'r' remote (network snapshots)
-    float skill = 0;          // AI pace 0..1 (0: by grid slot)
+    float skill = 0;          // AI pace 0.3..1.3, above 1 corners harder than the autopilot (0: 0.86..0.96 by grid slot)
 };
 
 struct RaceConfig {

@@ -6,7 +6,7 @@ at runtime, so the data files are served unmodified. See [FORMATS.md](FORMATS.md
 [docs/TECHNICAL.md](docs/TECHNICAL.md) for the full technical documentation.
 
 What works: all 6 tracks, all 11 car classes with their 12 team skins each (shown as rendered previews), AI
-opponents on the original racing lines, checkpoints/laps/positions with missed-checkpoint warnings, races by laps or
+opponents on the original racing lines (Easy, Normal or Hard), checkpoints/laps/positions with missed-checkpoint warnings, races by laps or
 by time, Cup and Open (mixed-class) races, practice with a ghost of your best or last lap, the championships
 (a cup per class plus the BSR championship) and the podium ceremony, the original's weather categories on every
 track including rain and thunder (or Random), tire smoke, skid marks and spray, the original HUD graphics (scalable),

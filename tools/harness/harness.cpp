@@ -5,6 +5,7 @@
 //        options via env: CAM=0..5 (follow, follow2, follow3, bumper, tower, TV), OPP=n, LAPS=n, TOP=kmh, SKINS=a,b,c
 //        WEATHER=preset WXCAT=sunny|cloudy|sunset|wet|rain
 //        TIME=s (timed race), PRACTICE=1, GHOST=1|2, CLASSES=a,b (AI classes, open race)
+//        SKILL=x        AI pace for every AI car (as the menu's difficulty sets it; default: by grid slot)
 //        STOP_AT=s      the player brakes to a stop at s (e.g. to watch the ghost drive on)
 //        PODIUM=1       show the prize ceremony after the race and screenshot it
 //        PREVIEW=skin,skin  render menu car previews of <class> and exit
@@ -182,7 +183,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i <= opp; i++) {
         std::string c = i > 0 && !classes.empty() ? classes[(i - 1) % classes.size()] : cls;
         cfg.cars.push_back({c, skins.empty() ? "" : skins[i % skins.size()], i > 0 && !classes.empty() ? 60.0f : top,
-                            i == 0 ? '0' : 'a'});
+                            i == 0 ? '0' : 'a', getenv("SKILL") ? (float)atof(getenv("SKILL")) : 0.0f});
     }
     if (!game.start(cfg)) { fprintf(stderr, "start failed\n"); return 1; }
     fprintf(stderr, "speakers: %zu\n", game.speakers().size());
