@@ -50,6 +50,7 @@ python3 tools/devserver.py 8000
 | Reset car to the last checkpoint | R | |
 | Pause | P or Esc | |
 | Standings / players in the room | Tab (hold) | |
+| Online top laps on / off (menu, race, results) | F5 | |
 | Debug lines (checkpoints, AI line) | F2 | |
 
 Split screen: player 1 uses WASD, Space (handbrake), C (camera) and R (reset); player 2 uses the arrows, Right Shift,
@@ -61,6 +62,11 @@ Pick **Online** in the menu, enter a name and **Create room**. Share the 4-lette
 friends pick **Join** with the code. The host chooses track, class, weather, race type, AI cars and length;
 everyone chooses their own team (and in open races their own class). Up to 8 players per room. Hold Tab to see
 everyone in the room with their ping; other players' cars carry a name tag with a connection dot.
+
+Online laps count towards a leaderboard of the top 10 lap times per track and class (each player's best, by name),
+shown for the selected track and class in the menu, beside the race and on the results screen in every mode but the
+championship (F5 or a click on its heading hides it). Only online laps are recorded. The server keeps it in `leaderboard.json` (`--leaderboard FILE`
+to put it elsewhere).
 
 The rooms run in `tools/devserver.py` (WebSocket at `/ws`, Python standard library only). To play with others,
 serve on all interfaces and open the port (or run it on a server, behind an HTTPS proxy for `wss://`):

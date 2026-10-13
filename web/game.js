@@ -18,13 +18,14 @@ const MAX_RACERS = 8;  // grid slots on every track
 // Player preferences, kept in this browser.
 const Settings = {
   musicMode: 'stereo',  // stereo | localized (from the trackside speakers) | off
+  showLeaders: true,    // online top laps in the menu, race and results (F5)
   genres: { surf: true, rock: true, dance: true },
   load() {
     try { Object.assign(this, JSON.parse(localStorage.getItem('bsr-settings')) || {}); } catch (e) {}
   },
   save() {
-    const { musicMode, genres, hudScale, hudStyle } = this;
-    try { localStorage.setItem('bsr-settings', JSON.stringify({ musicMode, genres, hudScale, hudStyle })); } catch (e) {}
+    const { musicMode, genres, hudScale, hudStyle, showLeaders } = this;
+    try { localStorage.setItem('bsr-settings', JSON.stringify({ musicMode, genres, hudScale, hudStyle, showLeaders })); } catch (e) {}
   },
 };
 Settings.load();
@@ -745,6 +746,7 @@ function refreshSel() {
   else if (guest) { go.textContent = 'WAITING FOR HOST'; go.disabled = true; }
   else { go.textContent = 'START RACE'; go.disabled = false; }
   Net.pushSettings();
+  Leaders.refresh();
 }
 
 // { laps, minutes }: minutes > 0 is a timed race.
@@ -841,6 +843,7 @@ function show(id) {
     $('restart').classList.toggle('hidden', net);
     $('quit').textContent = net ? 'LEAVE RACE' : 'QUIT TO MENU';
   }
+  Leaders.refresh();
 }
 
 // Opponents for an open race come from every class (the Monster truck only races Monster trucks).
@@ -922,7 +925,7 @@ async function startRace(opts) {
     show(null);
     for (const pre of ['h-', 'h2-']) $(pre + 'msg').textContent = '';
     $('h-keys').textContent = local > 1 ? 'WASD drive · Space handbrake · C camera · R reset · P pause'
-      : '↑↓←→ drive · Space handbrake · C camera · R reset' + (opts.online ? ' · Esc menu' : ' · P pause') + ' · Tab standings';
+      : '↑↓←→ drive · Space handbrake · C camera · R reset' + (opts.online ? ' · Esc menu' : ' · P pause') + ' · Tab standings · F5 top laps';
     $('h2-keys').textContent = '↑↓←→ drive · Right Shift handbrake · . camera · Backspace reset';
     Hud.shown = ['', ''];
     $('canvas').focus();
@@ -1013,6 +1016,9 @@ function showResults() {
   if (online && res.some((r) => !r.finished && !r.gone)) showResults.timer = setInterval(showResults, 1000);
 }
 
+// The class the (first) local player races in this race.
+const myClass = () => race.opts.racers.find((r) => r.role === '0')?.cls || race.opts.cls;
+
 // ------------------------------------------------------------------ engine callbacks
 function onLapTime(p, t) {
   if (!race || !(t > 0)) return;
@@ -1025,6 +1031,7 @@ function onLapTime(p, t) {
     flash('! - Your best lap this race - !', 2000, p);
   }
   race.best[p] = Math.min(race.best[p] || Infinity, t);
+  if (race.opts.online && Net.stillCurrent(race.opts)) Net.send({ t: 'lap', track: race.opts.track, cls, time: t });
 }
 
 const msgTimers = [0, 0];
@@ -1229,6 +1236,11 @@ const Net = {
       }
       case 'error':
         setStatus(m.msg);
+        break;
+      case 'board':
+        if (m.by === this.id && m.place && race && race.opts.online)
+          flash(`! - #${m.place} on the online leaderboard - !`, 3000, 0);
+        Leaders.onBoard(m);
         break;
       case 'profile':
         this.profiles[m.from] = { skin: m.skin | 0, cls: manifest.classes[m.cls] ? m.cls : null };
@@ -1474,6 +1486,90 @@ const Net = {
     this.race = null;
   },
 };
+
+// ------------------------------------------------------------------ online leaderboard
+// Top lap times of online races per track and class, kept by the relay. Shown for the selected track and class
+// in the menu, beside the race and on the results, in every mode but the championship; F5 (or a click on the
+// heading) collapses it to the heading. Outside a room the boards are asked over a socket of their own.
+const Leaders = {
+  boards: {},  // 'track|cls' -> { laps: [{ name, time, date }] | undefined, at: last request time }
+  ws: null, queue: [], offline: false,
+
+  ask(track, cls) {
+    const k = track + '|' + cls, b = this.boards[k];
+    if (b && performance.now() - b.at < 15000) return b;
+    (this.boards[k] ||= {}).at = performance.now();
+    const msg = JSON.stringify({ t: 'board', track, cls });
+    if (Net.connected()) Net.ws.send(msg);
+    else if (this.ws && this.ws.readyState === 1) this.ws.send(msg);
+    else {
+      this.queue.push(msg);
+      if (!this.ws) this.connect();
+    }
+    return this.boards[k];
+  },
+  connect() {
+    const ws = this.ws = new WebSocket(Net.url());
+    ws.onopen = () => { this.offline = false; for (const m of this.queue.splice(0)) ws.send(m); };
+    ws.onmessage = (e) => { try { const m = JSON.parse(e.data); if (m.t === 'board') this.onBoard(m); } catch (err) {} };
+    ws.onclose = () => {
+      if (ws.readyState === 3 && this.queue.length) this.offline = true;  // never opened: no relay here
+      this.ws = null;
+      this.queue = [];
+      this.refresh();
+    };
+  },
+  onBoard(m) {
+    const b = this.boards[m.track + '|' + m.cls] ||= { at: performance.now() };
+    b.laps = Array.isArray(m.laps) ? m.laps : [];
+    this.refresh();
+  },
+
+  render(el, track, cls) {
+    const esc = (t) => String(t).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+    const head = `<h3>Top laps <small>· ${esc(manifest.trackNames[track] || track)} · ${esc(className(cls))}</small>` +
+      `<small class="key">F5 ${Settings.showLeaders ? 'hide' : 'show'}</small></h3>`;
+    el.onclick = (e) => { if (e.target.closest('h3')) this.toggle(); };
+    if (!Settings.showLeaders) { el.innerHTML = head; return; }
+    const b = this.ask(track, cls);
+    const me = Net.connected() ? (Net.players.find((p) => p.id === Net.id) || {}).name : Net.name();
+    const laps = b.laps || [];
+    el.innerHTML = head + (!b.laps ? `<p class="sub">${this.offline ? 'No leaderboard server here.' : 'Loading…'}</p>`
+        : !laps.length ? '<p class="sub">No laps yet: set the first time in an online race.</p>'
+        : '<table class="table">' + laps.map((e, i) =>
+          `<tr class="${e.name === me ? 'me' : ''}"><td>${i + 1}</td><td>${esc(e.name)}</td>` +
+          `<td class="num">${fmtTime(e.time)}</td><td class="num date">${esc(e.date || '')}</td></tr>`).join('') + '</table>');
+  },
+  // Every place it can be: the menu (selected track and class), over the race while the HUD is up, the results.
+  refresh() {
+    if (!manifest) return;
+    const champ = (o) => !!o.champ;
+    const menu = $('menu-leaders');
+    menu.classList.toggle('hidden', sel.mode === 'champ');
+    if (inMenu() && sel.mode !== 'champ') this.render(menu, sel.track, sel.cls);
+    const over = $('race-leaders');
+    const onRace = Settings.showLeaders && !!race && !champ(race.opts) && race.local === 1 &&  // not across split screen
+      !$('hud').classList.contains('hidden');
+    over.classList.toggle('hidden', !onRace);
+    if (onRace) this.render(over, race.opts.track, myClass());
+    const res = $('res-leaders');
+    const onRes = !!race && !champ(race.opts) && !$('results').classList.contains('hidden');
+    res.classList.toggle('hidden', !onRes);
+    if (onRes) this.render(res, race.opts.track, myClass());
+  },
+  toggle() {
+    Settings.showLeaders = !Settings.showLeaders;
+    Settings.save();
+    this.refresh();
+  },
+};
+
+// F5: top laps on / off (it never reloads the page: that would end the race or drop the room).
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'F5') return;
+  e.preventDefault();
+  if (!e.repeat && manifest) Leaders.toggle();
+});
 
 // ------------------------------------------------------------------ Tab: standings / players
 function showBoard(on) {

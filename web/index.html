@@ -37,6 +37,7 @@
 </template>
 
 <div id="tags"></div>
+<div id="race-leaders" class="leaders hidden"></div>
 <div id="board" class="panel hidden">
   <h2 id="board-title">STANDINGS</h2>
   <table id="board-table"></table>
@@ -85,6 +86,7 @@
   <div class="row" id="row-track"><label>Track</label><div id="tracks" class="choices"></div></div>
   <div class="row" id="row-cls"><label>Class</label><select id="cls"></select></div>
   <div class="row" id="row-weather"><label>Weather</label><select id="weather"></select></div>
+  <div id="menu-leaders" class="leaders"></div>
   <div class="row" id="row-skin"><label id="skin-label">Skin</label><div id="skins" class="choices skins"></div></div>
   <div class="row hidden" id="row-skin2"><label>P2 skin</label><div id="skins2" class="choices skins"></div></div>
   <div class="row" id="row-racetype"><label>Race type</label><div id="racetype" class="choices">
@@ -123,6 +125,7 @@
 <div id="results" class="panel hidden">
   <h2>RESULTS</h2>
   <table id="res-table"></table>
+  <div id="res-leaders" class="leaders hidden"></div>
   <p id="res-note" class="sub"></p>
   <button id="again" class="big">RACE AGAIN</button>
   <button id="tomenu">MENU</button>
